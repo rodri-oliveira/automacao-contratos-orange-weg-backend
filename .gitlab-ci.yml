@@ -1,0 +1,15 @@
+include:
+  - project: 'dti/agd/templates/ci-templates-python'
+    ref: master
+    file: 'fastapi.yml'
+
+variables:
+  AUTOMATIC_DEPLOYMENT_ON_QA: "true"
+  UVICORN_APP_NAME: "app.main:app"
+  PYTHON_VERSION: "3.12.4"
+
+deploy:qa:
+  environment: qas
+
+deploy:prd:
+  environment: prd
