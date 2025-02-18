@@ -4,7 +4,6 @@ include:
     file: 'fastapi.yml'
 
 variables:
-  K8S_APP_NAME: "automacaofinancas-backend"
   AUTOMATIC_DEPLOYMENT_ON_QA: "true"
   UVICORN_APP_NAME: "app.main:app"
   PYTHON_VERSION: "3.12.4"
