@@ -6,6 +6,8 @@ from typing import Optional
 from io import BytesIO
 import traceback
 import json
+import aiohttp
+from typing import Dict, Any
 
 # Configurar logging mais detalhado
 logging.basicConfig(level=logging.DEBUG)
@@ -241,29 +243,24 @@ class SharePointAuth:
             logger.error(f"Erro ao obter request digest: {str(e)}")
             return ""
 
-    async def fazer_requisicao_sharepoint(self, url: str, headers: dict):
-        """Faz uma requisição ao SharePoint."""
+    async def fazer_requisicao_sharepoint(self, url: str, headers: Dict[str, str]) -> Dict[str, Any]:
+        """Faz uma requisição ao SharePoint usando aiohttp."""
         try:
-            logger.info(f"Iniciando requisição para: {url}")
-            logger.debug(f"Headers: {json.dumps(headers)}")
+            logger.debug(f"Iniciando requisição para URL: {url}")
+            logger.debug(f"Headers: {headers}")
             
-            response = requests.get(
-                url,
-                headers=headers,
-                verify=True  # Garante verificação SSL
-            )
-            
-            logger.debug(f"Status da resposta: {response.status_code}")
-            
-            if response.status_code == 200:
-                logger.info("Requisição bem sucedida")
-                return response
-            else:
-                logger.error(f"Erro na requisição: {response.status_code}")
-                logger.error(f"Detalhes: {response.text}")
-                return response
-            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    logger.debug(f"Status code recebido: {response.status}")
+                    texto = await response.text()
+                    logger.debug(f"Resposta recebida: {texto}")
+                    
+                    return {
+                        'status_code': response.status,
+                        'text': texto,
+                        'json': lambda: response.json()
+                    }
+                    
         except Exception as e:
-            logger.error(f"Erro na requisição: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Erro na requisição SharePoint: {str(e)}")
             raise

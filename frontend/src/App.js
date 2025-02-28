@@ -23,28 +23,31 @@ function App() {
     try {
         setLoading(true);
         setError(null);
-        console.log('Buscando arquivos para a aba:', activeTab);
+        console.log('Iniciando busca para:', activeTab);
         
         const response = await fetch(`http://localhost:8000/api/arquivos/${activeTab}`, {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
                 'Content-Type': 'application/json'
-            },
+            }
         });
 
-        console.log('Status da resposta:', response.status);
+        console.log('Status:', response.status);
         const data = await response.json();
-        console.log('Dados recebidos:', data);
-        
-        if (data.success && data.arquivos) {
-            console.log('Arquivos encontrados:', data.arquivos.length);
-            setFiles(data.arquivos);
+        console.log('Dados:', data);
+
+        if (response.ok) {
+            if (data.success && data.arquivos) {
+                setFiles(data.arquivos);
+            } else {
+                throw new Error(data.detail || 'Erro desconhecido');
+            }
         } else {
-            throw new Error(data.detail || 'Nenhum arquivo encontrado');
+            throw new Error(data.detail || 'Erro na requisição');
         }
     } catch (error) {
-        console.error('Erro detalhado:', error);
+        console.error('Erro completo:', error);
         setError(`Erro ao buscar arquivos: ${error.message}`);
         setFiles([]);
     } finally {
