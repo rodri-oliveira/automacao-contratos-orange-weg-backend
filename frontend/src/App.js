@@ -22,9 +22,10 @@ function App() {
   const handleSearchFiles = useCallback(async () => {
     try {
         setLoading(true);
+        setError(null);
         console.log('Buscando arquivos para a aba:', activeTab);
         
-        const response = await fetch(`http://localhost:8000/r189/api/arquivos/${activeTab}`, {
+        const response = await fetch(`http://localhost:8000/api/arquivos/${activeTab}`, {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
@@ -36,14 +37,16 @@ function App() {
         const data = await response.json();
         console.log('Dados recebidos:', data);
         
-        if (data.success) {
+        if (data.success && data.arquivos) {
+            console.log('Arquivos encontrados:', data.arquivos.length);
             setFiles(data.arquivos);
         } else {
-            throw new Error(data.detail || 'Erro ao buscar arquivos');
+            throw new Error(data.detail || 'Nenhum arquivo encontrado');
         }
     } catch (error) {
         console.error('Erro detalhado:', error);
         setError(`Erro ao buscar arquivos: ${error.message}`);
+        setFiles([]);
     } finally {
         setLoading(false);
     }
@@ -110,6 +113,37 @@ function App() {
     }
   };
 
+  const FileList = () => {
+    if (error) return <div style={{color: 'red'}}>{error}</div>;
+    // Se não houve busca ainda (estado inicial)
+    if (files.length === 0 && !error && !loading) return null;
+    // Se já houve busca mas não encontrou arquivos
+    if (files.length === 0) return <div>Nenhum arquivo encontrado</div>;
+
+    return (
+        <div className="file-list">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Tamanho</th>
+                        <th>Modificado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {files.map((file, index) => (
+                        <tr key={index}>
+                            <td>{file.nome}</td>
+                            <td>{(file.tamanho / 1024).toFixed(2)} KB</td>
+                            <td>{new Date(file.modificado).toLocaleString()}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+};
+
   return (
     <div className="App">
       <div className="app-header">
@@ -146,24 +180,10 @@ function App() {
               </div>
               
               {loading && <p>Carregando...</p>}
-              {error && <p className="error-message">{error}</p>}
+              {!loading && error && <p className="error-message">{error}</p>}
               
               <div className="files-section">
-                {files && files.length > 0 ? (
-                  <ul className="file-list">
-                    {files.map((file, index) => (
-                      <li
-                        key={index}
-                        className={`file-item ${selectedFiles.includes(file.nome) ? 'selected' : ''}`}
-                        onClick={() => handleFileSelection(file.nome)}
-                      >
-                        {file.nome}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="no-files">Nenhum arquivo encontrado</p>
-                )}
+                {!loading && <FileList />}
               </div>
             </div>
           </div>

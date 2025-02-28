@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import r189
+from app.api.routes import r189, qpe  # Adiciona import do qpe
 import logging
 
 # Configuração de logs
@@ -24,6 +24,7 @@ app.add_middleware(
 
 # Incluir rotas
 app.include_router(r189.router)
+app.include_router(qpe.router)  # Adiciona as rotas do QPE
 
 if __name__ == "__main__":
     import uvicorn

@@ -4,13 +4,38 @@ import pandas as pd
 import PyPDF2
 import re
 import traceback
-from app.core.sharepoint import SharePointClient
+import logging
+from app.core.auth import SharePointAuth  # Alterado para usar SharePointAuth diretamente
+
+logger = logging.getLogger(__name__)
 
 class QPEExtractor:
-    def __init__(self, input_file: str = None, output_dir: str = None):
-        self.input_file = input_file
-        self.output_dir = output_dir or (os.path.dirname(input_file) if input_file else None)
-        self.sharepoint = SharePointClient()
+    def __init__(self):
+        self.sharepoint_auth = SharePointAuth()  # Usando SharePointAuth ao invés de SharePointClient
+
+    async def process_file(self, file_content: BytesIO) -> dict:
+        """
+        Processa o arquivo PDF e extrai os dados necessários.
+        """
+        try:
+            logger.info("Iniciando processamento do arquivo QPE")
+            dados = self.extrair_dados_pdf(file_content)
+            
+            if not dados:
+                raise ValueError("Não foi possível extrair dados do PDF")
+            
+            return {
+                "success": True,
+                "data": dados
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro ao processar arquivo QPE: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     def extrair_dados_pdf(self, pdf_file: BytesIO) -> dict:
         """
@@ -75,55 +100,49 @@ class QPEExtractor:
             return dados
             
         except Exception as e:
-            print(f"❌ Erro ao extrair dados do PDF: {str(e)}")
-            print(traceback.format_exc())
+            logger.error(f"Erro ao extrair dados do PDF: {str(e)}")
+            logger.error(traceback.format_exc())
             raise
 
     async def consolidar_qpe(self, pdf_files: list) -> BytesIO:
         """
         Consolida os dados dos PDFs selecionados em um novo arquivo Excel.
-        Cada PDF selecionado gera uma nova linha no consolidado.
         """
         dados_consolidados = []
         pasta_qpe = '/teams/BR-TI-TIN/AutomaoFinanas/QPE'
         pasta_consolidado = '/teams/BR-TI-TIN/AutomaoFinanas/CONSOLIDADO'
-        nome_arquivo = 'QPE_consolidado.xlsx'
         
-        # Processa cada PDF selecionado
         for pdf_file in pdf_files:
             try:
-                # Se for string, é um arquivo do SharePoint
-                if isinstance(pdf_file, str):
-                    print(f"Baixando arquivo {pdf_file}...")
-                    pdf_content = await self.sharepoint.download_file(pdf_file, pasta_qpe)
-                else:
-                    pdf_content = pdf_file
+                token = self.sharepoint_auth.acquire_token()
+                if not token:
+                    raise Exception("Falha ao obter token para download")
+
+                # Download do arquivo usando SharePointAuth
+                pdf_content = await self.sharepoint_auth.baixar_arquivo_sharepoint(
+                    pdf_file,
+                    pasta_qpe
+                )
                 
-                # Extrai os dados do PDF
-                dados = self.extrair_dados_pdf(pdf_content)
-                if dados:
-                    dados_consolidados.append(dados)
+                if pdf_content:
+                    dados = self.extrair_dados_pdf(pdf_content)
+                    if dados:
+                        dados_consolidados.append(dados)
                 
             except Exception as e:
-                print(f"❌ Erro ao processar arquivo {pdf_file}: {str(e)}")
-                print(traceback.format_exc())
+                logger.error(f"Erro ao processar arquivo {pdf_file}: {str(e)}")
+                logger.error(traceback.format_exc())
                 continue
-        
+
         if not dados_consolidados:
             raise ValueError("Nenhum dado foi extraído dos PDFs")
-        
-        # Criar DataFrame com os dados consolidados
+
+        # Criar DataFrame e arquivo Excel
         df = pd.DataFrame(dados_consolidados)
-        
-        # Criar arquivo Excel em memória
         excel_output = BytesIO()
+        
         with pd.ExcelWriter(excel_output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='QPE_Consolidado')
-        
-        excel_output.seek(0)
-        
-        # Upload do arquivo consolidado para o SharePoint
-        await self.sharepoint.upload_file(excel_output, nome_arquivo, pasta_consolidado)
         
         excel_output.seek(0)
         return excel_output
