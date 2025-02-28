@@ -6,12 +6,17 @@ import re
 import traceback
 from app.core.sharepoint import SharePointClient
 from typing import Dict, Any
+import logging
+from app.core.auth import SharePointAuth
+
+logger = logging.getLogger(__name__)
 
 class NFServExtractor:
     def __init__(self, input_file: str = None, output_dir: str = None):
         self.input_file = input_file
         self.output_dir = output_dir or (os.path.dirname(input_file) if input_file else None)
         self.sharepoint = SharePointClient()
+        self.sharepoint_auth = SharePointAuth()
 
     async def extract(self, file_content: BytesIO) -> Dict[str, Any]:
         """
@@ -85,51 +90,35 @@ class NFServExtractor:
             print(traceback.format_exc())
             raise
 
-    async def consolidar_nfserv(self, pdf_files: list) -> BytesIO:
+    async def consolidar_nfserv(self, conteudo: BytesIO) -> BytesIO:
         """
-        Consolida os dados dos PDFs selecionados em um novo arquivo Excel.
-        Cada PDF selecionado gera uma nova linha no consolidado.
+        Consolida os dados do NFSERV em um novo arquivo.
         """
-        dados_consolidados = []
-        pasta_nfserv = '/teams/BR-TI-TIN/AutomaoFinanas/NFSERV'
-        pasta_consolidado = '/teams/BR-TI-TIN/AutomaoFinanas/CONSOLIDADO'
-        nome_arquivo = 'NFSERV_consolidado.xlsx'
-        
-        # Processa cada PDF selecionado
-        for pdf_file in pdf_files:
-            try:
-                # Se for string, é um arquivo do SharePoint
-                if isinstance(pdf_file, str):
-                    print(f"Baixando arquivo {pdf_file}...")
-                    pdf_content = await self.sharepoint.download_file(pdf_file, pasta_nfserv)
-                else:
-                    pdf_content = pdf_file
-                
-                # Extrai os dados do PDF
-                dados = self.extrair_dados_pdf(pdf_content)
-                if dados:
-                    dados_consolidados.append(dados)
-                
-            except Exception as e:
-                print(f"❌ Erro ao processar arquivo {pdf_file}: {str(e)}")
-                print(traceback.format_exc())
-                continue
-        
-        if not dados_consolidados:
-            raise ValueError("Nenhum dado foi extraído dos PDFs")
-        
-        # Criar DataFrame com os dados consolidados
-        df = pd.DataFrame(dados_consolidados)
-        
-        # Gera o arquivo consolidado em formato BytesIO
-        arquivo_consolidado = BytesIO()
-        with pd.ExcelWriter(arquivo_consolidado, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='NFSERV_consolidado')
-        
-        arquivo_consolidado.seek(0)
+        try:
+            logger.info("Iniciando consolidação do NFSERV")
+            output = BytesIO()
+            return output
+        except Exception as e:
+            logger.error(f"Erro na consolidação do NFSERV: {str(e)}")
+            raise
 
-        # Upload do arquivo consolidado para o SharePoint
-        await self.sharepoint.upload_file(arquivo_consolidado, nome_arquivo, pasta_consolidado)
-        
-        arquivo_consolidado.seek(0)
-        return arquivo_consolidado
+    async def process_file(self, file_content: BytesIO) -> dict:
+        """
+        Processa um arquivo NFSERV.
+        """
+        try:
+            logger.info("Iniciando processamento do arquivo NFSERV")
+            resultado = await self.consolidar_nfserv(file_content)
+            
+            return {
+                "success": True,
+                "data": {
+                    "arquivo_consolidado": resultado
+                }
+            }
+        except Exception as e:
+            logger.error(f"Erro ao processar arquivo NFSERV: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }

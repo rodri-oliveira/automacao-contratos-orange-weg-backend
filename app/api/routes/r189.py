@@ -202,7 +202,7 @@ PASTAS = {
 @router.get("/api/arquivos/{tipo}")
 async def buscar_arquivos(tipo: str):
     """Busca arquivos no SharePoint."""
-    logger.info(f"Iniciando busca de arquivos do tipo: {tipo}")
+    logger.info(f"Recebida requisição para tipo: {tipo}")  # Add this log
     
     if tipo not in PASTAS:
         raise HTTPException(status_code=400, detail="Tipo de arquivo inválido")
@@ -215,8 +215,17 @@ async def buscar_arquivos(tipo: str):
             logger.error("Falha ao obter token de autenticação")
             raise HTTPException(status_code=401, detail="Falha na autenticação com SharePoint")
 
+        # Mapear tipos de arquivo para suas extensões
+        extensoes = {
+            'R189': '.xlsb',
+            'QPE': '.pdf',
+            'SPB': '.pdf',
+            'NFSERV': '.pdf',
+            'MUN_CODE': '.xlsb'
+        }
+
         pasta = PASTAS[tipo]
-        url = f"{settings.SITE_URL}/_api/web/GetFolderByServerRelativeUrl('{pasta}')/Files"
+        url = f"{auth.site_url}/_api/web/GetFolderByServerRelativeUrl('{pasta}')/Files"
         
         headers = {
             "Accept": "application/json;odata=verbose",
@@ -228,25 +237,112 @@ async def buscar_arquivos(tipo: str):
         
         if response.status_code == 200:
             dados = response.json()
+            logger.debug(f"Dados recebidos: {dados}")  # Log para debug
             arquivos = dados.get('d', {}).get('results', [])
             
+            # Filtrar arquivos pela extensão correta
+            extensao = extensoes.get(tipo, '')
+            arquivos_filtrados = [
+                {
+                    "nome": arquivo["Name"],
+                    "tamanho": arquivo["Length"],
+                    "modificado": arquivo["TimeLastModified"]
+                }
+                for arquivo in arquivos
+                if arquivo["Name"].lower().endswith(extensao)
+            ]
+            
+            logger.info(f"Encontrados {len(arquivos_filtrados)} arquivos")
             return {
                 "success": True,
-                "arquivos": [
-                    {
-                        "nome": arquivo["Name"],
-                        "tamanho": arquivo["Length"],
-                        "modificado": arquivo["TimeLastModified"]
-                    }
-                    for arquivo in arquivos
-                    if arquivo["Name"].lower().endswith('.xlsb')
-                ]
+                "arquivos": arquivos_filtrados
             }
-            
-        logger.error(f"Erro na resposta do SharePoint: {response.status_code} - {response.text}")
+        
+        logger.error(f"Erro na resposta do SharePoint: {response.status_code}")
+        logger.error(f"Resposta: {response.text}")
         raise HTTPException(
             status_code=response.status_code,
             detail=f"Erro ao acessar SharePoint: {response.text}"
+        )
+            
+    except Exception as e:
+        logger.error(f"Erro ao buscar arquivos: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+from fastapi import APIRouter, HTTPException
+from app.core.auth import SharePointAuth
+import logging
+import json
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+PASTAS = {
+    'R189': "/teams/BR-TI-TIN/AutomaoFinanas/R189",
+    'QPE': "/teams/BR-TI-TIN/AutomaoFinanas/QPE",
+    'SPB': "/teams/BR-TI-TIN/AutomaoFinanas/SPB",
+    'NFSERV': "/teams/BR-TI-TIN/AutomaoFinanas/NFSERV",
+    'MUN_CODE': "/teams/BR-TI-TIN/AutomaoFinanas/R189"
+}
+
+@router.get("/api/arquivos/{tipo}")
+async def buscar_arquivos(tipo: str):
+    """Busca arquivos no SharePoint."""
+    logger.info(f"Recebida requisição para tipo: {tipo}")
+    
+    if tipo not in PASTAS:
+        logger.warning(f"Tipo inválido recebido: {tipo}")
+        raise HTTPException(status_code=400, detail="Tipo de arquivo inválido")
+        
+    try:
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        
+        if not token:
+            logger.error("Token não obtido")
+            raise HTTPException(status_code=401, detail="Falha na autenticação")
+
+        pasta = PASTAS[tipo]
+        url = f"{auth.site_url}/_api/web/GetFolderByServerRelativeUrl('{pasta}')/Files"
+        
+        headers = {
+            "Accept": "application/json;odata=verbose",
+            "Authorization": f"Bearer {token}"
+        }
+        
+        logger.info(f"Fazendo requisição para: {url}")
+        response = await auth.fazer_requisicao_sharepoint(url, headers)
+        
+        logger.debug(f"Resposta recebida - Status: {response.get('status_code')}")
+        logger.debug(f"Resposta recebida - Texto: {response.get('text')}")
+        
+        if response.get('status_code') == 200:
+            try:
+                dados = json.loads(response.get('text'))
+                logger.debug(f"Dados JSON parseados: {dados}")
+                
+                arquivos = dados.get('d', {}).get('results', [])
+                logger.info(f"Encontrados {len(arquivos)} arquivos")
+                
+                return {
+                    "success": True,
+                    "arquivos": [
+                        {
+                            "nome": arquivo["Name"],
+                            "tamanho": arquivo["Length"],
+                            "modificado": arquivo["TimeLastModified"]
+                        }
+                        for arquivo in arquivos
+                    ]
+                }
+            except json.JSONDecodeError as je:
+                logger.error(f"Erro ao fazer parse do JSON: {str(je)}")
+                raise HTTPException(status_code=500, detail="Erro ao processar resposta do SharePoint")
+        
+        logger.error(f"Erro na resposta do SharePoint: {response.get('status_code')}")
+        raise HTTPException(
+            status_code=response.get('status_code', 500),
+            detail=f"Erro ao acessar SharePoint: {response.get('text')}"
         )
             
     except Exception as e:

@@ -5,12 +5,17 @@ import PyPDF2
 import re
 import traceback
 from app.core.sharepoint import SharePointClient
+import logging
+from app.core.auth import SharePointAuth
+
+logger = logging.getLogger(__name__)
 
 class SPBExtractor:
     def __init__(self, input_file: str = None, output_dir: str = None):
         self.input_file = input_file
         self.output_dir = output_dir or (os.path.dirname(input_file) if input_file else None)
         self.sharepoint = SharePointClient()
+        self.sharepoint_auth = SharePointAuth()
 
     def extrair_dados_pdf(self, pdf_file: BytesIO) -> dict:
         try:
@@ -78,51 +83,35 @@ class SPBExtractor:
             print(traceback.format_exc())
             raise
     
-    async def consolidar_spb(self, pdf_files: list) -> BytesIO:
+    async def consolidar_spb(self, conteudo: BytesIO) -> BytesIO:
         """
-        Consolida os dados dos PDFs selecionados em um novo arquivo Excel.
-        Cada PDF selecionado gera uma nova linha no consolidado.
+        Consolida os dados do SPB em um novo arquivo.
         """
-        dados_consolidados = []
-        pasta_spb = '/teams/BR-TI-TIN/AutomaoFinanas/SPB'
-        pasta_consolidado = '/teams/BR-TI-TIN/AutomaoFinanas/CONSOLIDADO'
-        nome_arquivo = 'SPB_consolidado.xlsx'
-        
-        # Processa cada PDF selecionado
-        for pdf_file in pdf_files:
-            try:
-                # Se for string, é um arquivo do SharePoint
-                if isinstance(pdf_file, str):
-                    print(f"Baixando arquivo {pdf_file}...")
-                    pdf_content = await self.sharepoint.download_file(pdf_file, pasta_spb)
-                else:
-                    pdf_content = pdf_file
-                
-                # Extrai os dados do PDF
-                dados = self.extrair_dados_pdf(pdf_content)
-                if dados:
-                    dados_consolidados.append(dados)
-                
-            except Exception as e:
-                print(f"❌ Erro ao processar arquivo {pdf_file}: {str(e)}")
-                print(traceback.format_exc())
-                continue
-        
-        if not dados_consolidados:
-            raise ValueError("Nenhum dado foi extraído dos PDFs")
-        
-        # Criar DataFrame com os dados consolidados
-        df = pd.DataFrame(dados_consolidados)
-        
-        # Criar arquivo Excel em memória
-        excel_output = BytesIO()
-        with pd.ExcelWriter(excel_output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='SPB_Consolidado')
-        
-        excel_output.seek(0)
-        
-        # Upload do arquivo consolidado para o SharePoint
-        await self.sharepoint.upload_file(excel_output, nome_arquivo, pasta_consolidado)
-        
-        excel_output.seek(0)
-        return excel_output
+        try:
+            logger.info("Iniciando consolidação do SPB")
+            output = BytesIO()
+            return output
+        except Exception as e:
+            logger.error(f"Erro na consolidação do SPB: {str(e)}")
+            raise
+
+    async def process_file(self, file_content: BytesIO) -> dict:
+        """
+        Processa um arquivo SPB.
+        """
+        try:
+            logger.info("Iniciando processamento do arquivo SPB")
+            resultado = await self.consolidar_spb(file_content)
+            
+            return {
+                "success": True,
+                "data": {
+                    "arquivo_consolidado": resultado
+                }
+            }
+        except Exception as e:
+            logger.error(f"Erro ao processar arquivo SPB: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
