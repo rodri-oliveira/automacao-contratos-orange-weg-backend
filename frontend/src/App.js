@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import './App.css';
 
 function App() {
@@ -19,98 +19,77 @@ function App() {
     setActiveTab(tab);
   };
 
-  const handleSearchFiles = async () => {
-    setLoading(true);
-    setError(null);
+  const handleSearchFiles = useCallback(async () => {
     try {
-      console.log(`Buscando arquivos para a aba: ${activeTab}`);
-      
-      const response = await fetch(`/api/arquivos/${activeTab}`);
-      console.log('Status da resposta:', response.status);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('Dados recebidos da API:', data);
-      
-      const arquivos = data.arquivos || [];
-      setFiles(arquivos);
-      
-      // Seleciona todos os arquivos por padrão
-      setSelectedFiles(arquivos.map(file => file.nome));
-      
-      console.log('Estado files após atualização:', data.arquivos);
+        setLoading(true);
+        console.log('Buscando arquivos para a aba:', activeTab);
+        
+        const response = await fetch(`http://localhost:8000/r189/api/arquivos/${activeTab}`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+        });
+
+        console.log('Status da resposta:', response.status);
+        const data = await response.json();
+        console.log('Dados recebidos:', data);
+        
+        if (data.success) {
+            setFiles(data.arquivos);
+        } else {
+            throw new Error(data.detail || 'Erro ao buscar arquivos');
+        }
     } catch (error) {
-      console.error('Erro detalhado:', error);
-      setError('Erro ao buscar arquivos. Tente novamente.');
+        console.error('Erro detalhado:', error);
+        setError(`Erro ao buscar arquivos: ${error.message}`);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  };
+}, [activeTab]);
 
   const handleProcessFiles = async () => {
-    if (!selectedFiles.length) {
-      setError('Selecione pelo menos um arquivo para processar.');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    
     try {
-      console.log('Arquivos selecionados para processamento:', selectedFiles);
-      
-      const response = await fetch(`/api/processar/${activeTab}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(selectedFiles)
-      });
+        setLoading(true);
+        console.log('Iniciando processamento dos arquivos:', selectedFiles);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-      }
+        const response = await fetch('/r189/process', { // Note o novo caminho
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ files: selectedFiles }) // Alterado para match com o backend
+        });
 
-      const result = await response.json();
-      console.log('Resultado do processamento:', result);
+        console.log('Status da resposta:', response.status);
+        const data = await response.json();
+        console.log('Resposta completa:', data);
 
-      if (result.status === 'success') {
-        // Atualiza o status do processamento
-        setStatus(prev => ({
-          ...prev,
-          [activeTab]: 'Processamento concluído com sucesso'
-        }));
-
-        // Se for R189 e processado com sucesso, habilita a próxima aba
-        if (activeTab === 'R189') {
-          setStatus(prev => ({
-            ...prev,
-            QPE: true
-          }));
+        if (!response.ok) {
+            throw new Error(data.detail || JSON.stringify(data));
         }
 
-        // Mostra mensagem de sucesso
-        alert('Arquivos processados com sucesso!');
-      } else {
-        throw new Error(result.mensagem || 'Erro no processamento dos arquivos');
-      }
+        // Atualizar status baseado nos resultados
+        const sucessos = data.results.filter(p => p.status === "success").length;
+        const total = data.results.length;
+        
+        setStatus(prevStatus => ({
+            ...prevStatus,
+            [activeTab]: `Processado ${sucessos}/${total} arquivos`
+        }));
 
     } catch (error) {
-      console.error('Erro ao processar arquivos:', error);
-      setError(error.message);
-      setStatus(prev => ({
-        ...prev,
-        [activeTab]: 'Erro no processamento'
-      }));
-      alert(`Erro no processamento: ${error.message}`);
+        console.error('Erro detalhado:', error);
+        setError(`Erro ao processar arquivos: ${error.message}`);
+        setStatus(prevStatus => ({
+            ...prevStatus,
+            [activeTab]: 'Erro no processamento'
+        }));
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  };
+};
 
   const handleResetProcess = () => {
     setFiles([]);

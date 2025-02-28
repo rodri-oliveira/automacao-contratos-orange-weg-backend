@@ -1,18 +1,26 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 class Settings(BaseSettings):
-    root_path: Optional[str] = None
-    swagger_servers_list: Optional[str] = None
-    jwt_issuer: str = "automacao-financas-api"
-    jwt_audience: str = "automacao-financas-client"
-    client_id: str = "your_client_id"
-    client_secret: str = "your_client_secret"
-    tenant_id: str = "your_tenant_id"
-    resource: str = "your_resource"
-    site_url: str = "your_sharepoint_site_url"
+    # Configurações do SharePoint
+    SITE_URL: str = os.getenv("SITE_URL", "")
+    CLIENT_ID: str = os.getenv("CLIENT_ID", "")
+    CLIENT_SECRET: str = os.getenv("CLIENT_SECRET", "")
+    TENANT_ID: str = os.getenv("TENANT_ID", "")
+    RESOURCE: str = os.getenv("RESOURCE", "")
+
+    # Caminhos das pastas no SharePoint
+    R189_FOLDER: str = "/teams/BR-TI-TIN/AutomaoFinanas/R189"
+    CONSOLIDATED_FOLDER: str = "/teams/BR-TI-TIN/AutomaoFinanas/CONSOLIDADO"
+
+    # Configurações da API
+    API_V1_STR: str = "/api/v1"
+    PROJECT_NAME: str = "Automação Finanças API"
 
     class Config:
-        env_file = ".env"
+        case_sensitive = True
 
-settings = Settings()  # type: ignore
+settings = Settings()

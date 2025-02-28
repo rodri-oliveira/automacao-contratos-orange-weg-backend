@@ -1,105 +1,254 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, UploadFile, File
 from typing import List, Dict, Any
 from io import BytesIO
+import logging
+from pydantic import BaseModel
+
 from app.core.sharepoint import SharePointClient
+from app.core.extractors.r189_extractor import R189Extractor
 from app.core.config import settings
-from app.core.services.processing_service import ProcessingService
-import pandas as pd
+from app.core.auth import SharePointAuth
 
-router = APIRouter()
+router = APIRouter(prefix="/r189", tags=["R189"])
+logger = logging.getLogger(__name__)
+
+# Instâncias compartilhadas
 sharepoint_client = SharePointClient()
-processing_service = ProcessingService()
+r189_extractor = R189Extractor()
 
-@router.post("/upload")
-async def upload_files(
-    files: List[UploadFile] = File(...)
-) -> Dict[str, Any]:
-    """Handle file uploads and store them in SharePoint."""
+class ProcessFilesRequest(BaseModel):
+    files: List[str]
+
+@router.get("/files")
+async def list_r189_files():
+    """Lista os arquivos R189 disponíveis no SharePoint"""
     try:
-        uploaded_files = []
-        for file in files:
-            content = await file.read()
-            file_content = BytesIO(content)
-            
-            # Upload to SharePoint
-            await sharepoint_client.upload_file(
-                file_content=file_content,
-                destination_name=file.filename,
-                folder_path=settings.sharepoint_upload_folder
+        sharepoint = SharePointClient()
+        pasta_r189 = '/teams/BR-TI-TIN/AutomaoFinanas/R189'
+        
+        files = await sharepoint.list_files(pasta_r189)
+        
+        if files is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao listar arquivos"
             )
-            
-            uploaded_files.append({
-                "name": file.filename,
-                "size": len(content),
-                "status": "success"
-            })
-            
-        return {"files": uploaded_files}
+        
+        # Filtra apenas arquivos .xlsb
+        r189_files = [
+            {
+                "name": file["Name"],
+                "size": file["Length"],
+                "modified": file["TimeLastModified"]
+            }
+            for file in files
+            if file["Name"].lower().endswith('.xlsb')
+        ]
+        
+        return {
+            "success": True,
+            "files": r189_files
+        }
+        
     except Exception as e:
+        logger.error(f"Erro ao listar arquivos R189: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro durante upload do arquivo: {str(e)}"
+            detail=str(e)
         )
 
 @router.post("/process")
-async def process_files(
-    files: Dict[str, List[str]]
-) -> Dict[str, Any]:
-    """Process uploaded files and generate divergence report."""
+async def process_files(request: ProcessFilesRequest):
+    """Processa arquivos R189 selecionados"""
     try:
-        # Download files from SharePoint
-        file_contents = {}
-        for file_type, file_names in files.items():
-            for file_name in file_names:
-                content = await sharepoint_client.download_file(
-                    folder_path=settings.sharepoint_upload_folder,
-                    file_name=file_name
-                )
-                file_contents[file_type] = BytesIO(content)
-
-        # Process files
-        result = await processing_service.process_files(file_contents)
-        
-        if not result["success"]:
+        if not request.files:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result["error"]
+                detail="Nenhum arquivo selecionado"
             )
 
+        results = []
+        for file_name in request.files:
+            try:
+                # Download do arquivo
+                content = await sharepoint_client.download_file(
+                    settings.R189_FOLDER, 
+                    file_name
+                )
+                
+                if not content:
+                    results.append({
+                        "file": file_name,
+                        "status": "error",
+                        "message": "Erro ao baixar arquivo"
+                    })
+                    continue
+
+                # Processa o arquivo
+                result = await r189_extractor.process_file(content)
+                
+                if not result["success"]:
+                    results.append({
+                        "file": file_name,
+                        "status": "error",
+                        "message": result["error"]
+                    })
+                    continue
+
+                # Upload do arquivo consolidado
+                if "consolidated_file" in result:
+                    consolidated_name = f"Consolidado_{file_name.replace('.xlsb', '.xlsx')}"
+                    success = await sharepoint_client.upload_file(
+                        result["consolidated_file"],
+                        consolidated_name,
+                        settings.CONSOLIDATED_FOLDER
+                    )
+
+                    results.append({
+                        "file": file_name,
+                        "status": "success" if success else "error",
+                        "message": ("Arquivo processado e consolidado com sucesso" 
+                                  if success else "Erro ao enviar arquivo consolidado")
+                    })
+                else:
+                    results.append({
+                        "file": file_name,
+                        "status": "error",
+                        "message": "Arquivo processado mas sem conteúdo consolidado"
+                    })
+
+            except Exception as e:
+                logger.error(f"Erro processando arquivo {file_name}: {str(e)}")
+                results.append({
+                    "file": file_name,
+                    "status": "error",
+                    "message": str(e)
+                })
+
         return {
-            "success": True,
-            "divergences": result["divergences"]
+            "success": any(r["status"] == "success" for r in results),
+            "results": results
         }
 
     except Exception as e:
+        logger.error(f"Erro no processamento: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro durante processamento: {str(e)}"
+            detail=str(e)
         )
 
-@router.get("/download-report")
-async def download_report(
-    report_data: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Generate and download Excel report from results."""
+@router.get("/verify/{file_name}")
+async def verify_file(file_name: str):
+    """Verifica se um arquivo consolidado existe"""
     try:
-        # Convert divergences to DataFrame
-        df = pd.DataFrame(report_data["divergences"])
+        consolidated_name = f"Consolidado_{file_name.replace('.xlsb', '.xlsx')}"
         
-        # Create Excel file in memory
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False)
-        
-        output.seek(0)
+        exists = await sharepoint_client.check_file_exists(
+            settings.CONSOLIDATED_FOLDER,
+            consolidated_name
+        )
         
         return {
             "success": True,
-            "file_content": output,
-            "filename": f"relatorio_divergencias_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            "exists": exists,
+            "file": consolidated_name,
+            "folder": settings.CONSOLIDATED_FOLDER
         }
     except Exception as e:
+        logger.error(f"Erro ao verificar arquivo: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao gerar relatório: {str(e)}"
+            detail=str(e)
         )
+
+@router.get("/download/{file_name}")
+async def download_file(file_name: str):
+    """Download de um arquivo R189 consolidado"""
+    try:
+        content = await sharepoint_client.download_file(
+            settings.CONSOLIDATED_FOLDER,
+            file_name
+        )
+        
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Arquivo {file_name} não encontrado"
+            )
+        
+        return {
+            "success": True,
+            "content": content,
+            "file_name": file_name
+        }
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Erro ao fazer download: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+PASTAS = {
+    'R189': "/teams/BR-TI-TIN/AutomaoFinanas/R189",
+    'QPE': "/teams/BR-TI-TIN/AutomaoFinanas/QPE",
+    'SPB': "/teams/BR-TI-TIN/AutomaoFinanas/SPB",
+    'NFSERV': "/teams/BR-TI-TIN/AutomaoFinanas/NFSERV",
+    'MUN_CODE': "/teams/BR-TI-TIN/AutomaoFinanas/R189"
+}
+
+@router.get("/api/arquivos/{tipo}")
+async def buscar_arquivos(tipo: str):
+    """Busca arquivos no SharePoint."""
+    logger.info(f"Iniciando busca de arquivos do tipo: {tipo}")
+    
+    if tipo not in PASTAS:
+        raise HTTPException(status_code=400, detail="Tipo de arquivo inválido")
+        
+    try:
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        
+        if not token:
+            logger.error("Falha ao obter token de autenticação")
+            raise HTTPException(status_code=401, detail="Falha na autenticação com SharePoint")
+
+        pasta = PASTAS[tipo]
+        url = f"{settings.SITE_URL}/_api/web/GetFolderByServerRelativeUrl('{pasta}')/Files"
+        
+        headers = {
+            "Accept": "application/json;odata=verbose",
+            "Authorization": f"Bearer {token}"
+        }
+        
+        logger.info(f"Fazendo requisição para: {url}")
+        response = await auth.fazer_requisicao_sharepoint(url, headers)
+        
+        if response.status_code == 200:
+            dados = response.json()
+            arquivos = dados.get('d', {}).get('results', [])
+            
+            return {
+                "success": True,
+                "arquivos": [
+                    {
+                        "nome": arquivo["Name"],
+                        "tamanho": arquivo["Length"],
+                        "modificado": arquivo["TimeLastModified"]
+                    }
+                    for arquivo in arquivos
+                    if arquivo["Name"].lower().endswith('.xlsb')
+                ]
+            }
+            
+        logger.error(f"Erro na resposta do SharePoint: {response.status_code} - {response.text}")
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Erro ao acessar SharePoint: {response.text}"
+        )
+            
+    except Exception as e:
+        logger.error(f"Erro ao buscar arquivos: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
