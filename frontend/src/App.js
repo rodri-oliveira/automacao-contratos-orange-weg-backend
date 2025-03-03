@@ -116,13 +116,15 @@ function App() {
     }
   };
 
-  const handleSelectAll = () => {
+  // Melhore a função handleSelectAll
+const handleSelectAll = () => {
     if (selectedFiles.length === files.length) {
         // Se todos estão selecionados, desseleciona todos
         setSelectedFiles([]);
     } else {
-        // Seleciona todos
-        setSelectedFiles(files.map(file => file.nome));
+        // Seleciona todos os arquivos disponíveis
+        const allFileNames = files.map(file => file.nome);
+        setSelectedFiles(allFileNames);
     }
 };
 
@@ -133,10 +135,24 @@ function App() {
 
     return (
         <div className="file-list">
+            <div className="selection-header">
+                <label className="select-all-label">
+                    <input
+                        type="checkbox"
+                        className="select-all-checkbox"
+                        checked={selectedFiles.length === files.length}
+                        onChange={handleSelectAll}
+                    />
+                    <span>Selecionar Todos</span>
+                </label>
+                <span className="selected-count">
+                    ({selectedFiles.length} de {files.length} selecionados)
+                </span>
+            </div>
             <table>
                 <thead>
                     <tr>
-                        <th>Selecionar</th>
+                        <th className="checkbox-column"></th>
                         <th>Nome</th>
                         <th>Tamanho</th>
                         <th>Modificado</th>
@@ -144,8 +160,11 @@ function App() {
                 </thead>
                 <tbody>
                     {files.map((file, index) => (
-                        <tr key={index}>
-                            <td>
+                        <tr 
+                            key={index}
+                            className={selectedFiles.includes(file.nome) ? 'selected-row' : ''}
+                        >
+                            <td className="checkbox-column">
                                 <input
                                     type="checkbox"
                                     checked={selectedFiles.includes(file.nome)}
@@ -159,17 +178,6 @@ function App() {
                     ))}
                 </tbody>
             </table>
-            <div className="selection-controls">
-                <button 
-                    className="select-all-button"
-                    onClick={() => handleSelectAll()}
-                >
-                    {selectedFiles.length === files.length ? 'Desselecionar Todos' : 'Selecionar Todos'}
-                </button>
-                <span className="selected-count">
-                    {selectedFiles.length} arquivo(s) selecionado(s)
-                </span>
-            </div>
         </div>
     );
 };
