@@ -57,41 +57,41 @@ function App() {
 
   const handleProcessFiles = async () => {
     try {
+        if (selectedFiles.length === 0) {
+            setError("Por favor, selecione pelo menos um arquivo para processar.");
+            return;
+        }
+
         setLoading(true);
         console.log('Iniciando processamento dos arquivos:', selectedFiles);
 
-        const response = await fetch('/r189/process', { // Note o novo caminho
+        const response = await fetch('http://localhost:8000/api/processar/r189', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ files: selectedFiles }) // Alterado para match com o backend
+            body: JSON.stringify(selectedFiles)
         });
 
-        console.log('Status da resposta:', response.status);
         const data = await response.json();
-        console.log('Resposta completa:', data);
-
-        if (!response.ok) {
-            throw new Error(data.detail || JSON.stringify(data));
-        }
-
-        // Atualizar status baseado nos resultados
-        const sucessos = data.results.filter(p => p.status === "success").length;
-        const total = data.results.length;
         
-        setStatus(prevStatus => ({
-            ...prevStatus,
-            [activeTab]: `Processado ${sucessos}/${total} arquivos`
-        }));
-
+        if (response.ok) {
+            setStatus(prevStatus => ({
+                ...prevStatus,
+                R189: 'Processamento concluído'
+            }));
+            setSelectedFiles([]); // Limpa a seleção após processamento
+            alert('Arquivos processados com sucesso!');
+        } else {
+            throw new Error(data.detail || 'Erro no processamento');
+        }
     } catch (error) {
-        console.error('Erro detalhado:', error);
-        setError(`Erro ao processar arquivos: ${error.message}`);
+        console.error('Erro:', error);
         setStatus(prevStatus => ({
             ...prevStatus,
-            [activeTab]: 'Erro no processamento'
+            R189: 'Erro no processamento'
         }));
+        setError(`Erro ao processar arquivos: ${error.message}`);
     } finally {
         setLoading(false);
     }
@@ -116,11 +116,19 @@ function App() {
     }
   };
 
+  const handleSelectAll = () => {
+    if (selectedFiles.length === files.length) {
+        // Se todos estão selecionados, desseleciona todos
+        setSelectedFiles([]);
+    } else {
+        // Seleciona todos
+        setSelectedFiles(files.map(file => file.nome));
+    }
+};
+
   const FileList = () => {
     if (error) return <div style={{color: 'red'}}>{error}</div>;
-    // Se não houve busca ainda (estado inicial)
     if (files.length === 0 && !error && !loading) return null;
-    // Se já houve busca mas não encontrou arquivos
     if (files.length === 0) return <div>Nenhum arquivo encontrado</div>;
 
     return (
@@ -128,6 +136,7 @@ function App() {
             <table>
                 <thead>
                     <tr>
+                        <th>Selecionar</th>
                         <th>Nome</th>
                         <th>Tamanho</th>
                         <th>Modificado</th>
@@ -136,6 +145,13 @@ function App() {
                 <tbody>
                     {files.map((file, index) => (
                         <tr key={index}>
+                            <td>
+                                <input
+                                    type="checkbox"
+                                    checked={selectedFiles.includes(file.nome)}
+                                    onChange={() => handleFileSelection(file.nome)}
+                                />
+                            </td>
                             <td>{file.nome}</td>
                             <td>{(file.tamanho / 1024).toFixed(2)} KB</td>
                             <td>{new Date(file.modificado).toLocaleString()}</td>
@@ -143,6 +159,17 @@ function App() {
                     ))}
                 </tbody>
             </table>
+            <div className="selection-controls">
+                <button 
+                    className="select-all-button"
+                    onClick={() => handleSelectAll()}
+                >
+                    {selectedFiles.length === files.length ? 'Desselecionar Todos' : 'Selecionar Todos'}
+                </button>
+                <span className="selected-count">
+                    {selectedFiles.length} arquivo(s) selecionado(s)
+                </span>
+            </div>
         </div>
     );
 };

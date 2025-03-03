@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 
 class R189Extractor:
     def __init__(self):
-        # Instancia a classe SharePointAuth uma vez
         self.sharepoint_auth = SharePointAuth()
+        logger.info("R189Extractor inicializado")
 
     async def process_file(self, file_content: BytesIO) -> Dict[str, Any]:
         """Processa um arquivo R189"""
@@ -88,38 +88,31 @@ class R189Extractor:
                 "details": str(e)
             }
 
-    async def consolidar_r189(self, conteudo: BytesIO) -> BytesIO:
-        """
-        Consolida o arquivo R189 com colunas específicas e trata valores vazios de CNPJ.
-        
-        Args:
-            conteudo: BytesIO contendo o arquivo Excel
-            
-        Returns:
-            BytesIO contendo o arquivo consolidado
-        """
+    def consolidar_r189(self, conteudo: BytesIO) -> BytesIO:
+        """Consolida um arquivo R189."""
         try:
             logger.info("Iniciando consolidação do arquivo R189")
-            # Lê o arquivo diretamente do BytesIO
+            
+            # Lê o arquivo Excel
             df = pd.read_excel(
                 conteudo,
-                sheet_name=None,  # Lê todas as abas
+                sheet_name=None,
                 na_values=['', ' '],
                 keep_default_na=True,
-                header=12  # Linha 13 como cabeçalho
+                header=12
             )
+            
+            logger.info("Arquivo lido com sucesso")
 
             # Verifica se a aba 'BRASIL' existe
             if 'BRASIL' not in df:
-                raise ValueError("A aba 'BRASIL' não foi encontrada no arquivo Excel.")
-            
-            # Obtém os dados apenas da aba 'BRASIL'
+                raise ValueError("Aba 'BRASIL' não encontrada")
+
+            # Processa os dados
             df_brasil = df['BRASIL']
-
-            # Combina todas as abas em um único DataFrame
             df_consolidado = df_brasil.copy()
-
-            # Seleciona apenas as colunas necessárias
+            
+            # Seleciona e verifica colunas
             colunas_necessarias = [
                 'CNPJ - WEG',
                 'Invoice number',
@@ -128,45 +121,110 @@ class R189Extractor:
                 'Account number'
             ]
             
-            # Verifica se todas as colunas necessárias existem
             colunas_faltantes = [col for col in colunas_necessarias if col not in df_consolidado.columns]
             if colunas_faltantes:
-                raise ValueError(f"Colunas faltantes no arquivo Excel: {colunas_faltantes}")
+                raise ValueError(f"Colunas faltantes: {colunas_faltantes}")
             
-            # Seleciona apenas as colunas necessárias
+            # Processa o DataFrame
             df_resultado = df_consolidado[colunas_necessarias].copy()
+            df_resultado = df_resultado.groupby(
+                ['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2'], 
+                as_index=False
+            )['Total Geral'].sum()
             
-            # Identifica linhas onde Account number NÃO contém a string 'Total'
-            linhas_sem_total = ~df_resultado['Account number'].astype(str).str.contains('Total', na=True)
-            
-            # Aplica o ffill apenas nas linhas onde Account number NÃO contém 'Total'
-            df_resultado.loc[linhas_sem_total, 'Invoice number'] = df_resultado.loc[linhas_sem_total, 'Invoice number'].ffill()
-            
-            # Preenche outros valores vazios
-            df_resultado[['CNPJ - WEG', 'Site Name - WEG 2']] = df_resultado[['CNPJ - WEG', 'Site Name - WEG 2']].ffill()
-            
-            # Remove linhas que ainda possuem valores NaN nas colunas principais
-            df_resultado = df_resultado.dropna(subset=['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2', 'Total Geral'])
-
-            # Remove a coluna Account number antes do agrupamento
-            df_resultado = df_resultado.drop('Account number', axis=1)
-
-            # Agrupa por todas as colunas exceto 'Total Geral' e soma os valores
-            df_resultado = df_resultado.groupby(['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2'], as_index=False)['Total Geral'].sum()
-
-            # Gera o arquivo consolidado em formato BytesIO
-            arquivo_consolidado = BytesIO()
-            with pd.ExcelWriter(arquivo_consolidado, engine='xlsxwriter') as writer:
+            # Gera arquivo Excel
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_resultado.to_excel(writer, index=False, sheet_name='Consolidado_R189')
             
-            arquivo_consolidado.seek(0)
-            
-            return arquivo_consolidado
-            
+            output.seek(0)
+            logger.info("Consolidação concluída com sucesso")
+            return output
+
         except Exception as e:
-            logger.error(f"❌ Erro ao consolidar arquivo R189: {str(e)}")
+            logger.error(f"Erro ao consolidar R189: {str(e)}")
             logger.error(traceback.format_exc())
             raise
+
+    async def process_selected_files(self, selected_files: List[str]) -> Dict[str, Any]:
+        try:
+            logger.info(f"Iniciando processamento de {len(selected_files)} arquivos R189")
+            
+            if not selected_files:
+                return {
+                    "success": False,
+                    "error": "Nenhum arquivo selecionado para processamento"
+                }
+
+            arquivos_processados = []
+            for arquivo in selected_files:
+                try:
+                    logger.info(f"Processando arquivo: {arquivo}")
+                    
+                    # Download do arquivo
+                    content = self.sharepoint_auth.baixar_arquivo_sharepoint(
+                        arquivo,
+                        "/teams/BR-TI-TIN/AutomaoFinanas/R189"
+                    )
+                    
+                    if not content:
+                        logger.error(f"Falha ao baixar arquivo: {arquivo}")
+                        continue
+
+                    # Consolida o arquivo
+                    arquivo_consolidado = self.consolidar_r189(content)
+                    
+                    if arquivo_consolidado:
+                        # Nome do arquivo consolidado
+                        nome_consolidado = f"R189_consolidado_{uuid.uuid4().hex[:8]}.xlsx"
+                        logger.info(f"Arquivo consolidado gerado: {nome_consolidado}")
+                        
+                        # Converte BytesIO para bytes
+                        arquivo_bytes = arquivo_consolidado.getvalue()
+                        logger.info(f"Tamanho do arquivo consolidado: {len(arquivo_bytes)} bytes")
+                        
+                        # Configuração para upload
+                        destino = "/teams/BR-TI-TIN/AutomaoFinanas/CONSOLIDADO"
+                        logger.info(f"Enviando para: {destino}/{nome_consolidado}")
+                        
+                        # Envia para o SharePoint
+                        success = await self.sharepoint_auth.enviar_arquivo_sharepoint(
+                            arquivo_bytes,
+                            nome_consolidado,
+                            destino
+                        )
+                        
+                        if success:
+                            logger.info(f"Arquivo {nome_consolidado} enviado com sucesso")
+                            arquivos_processados.append({
+                                "nome_original": arquivo,
+                                "nome_consolidado": nome_consolidado,
+                                "status": "Processado com sucesso"
+                            })
+                        else:
+                            raise Exception(f"Falha ao enviar arquivo {nome_consolidado}")
+                        
+                except Exception as e:
+                    logger.error(f"Erro ao processar arquivo {arquivo}: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    arquivos_processados.append({
+                        "nome": arquivo,
+                        "status": f"Erro: {str(e)}"
+                    })
+
+            return {
+                "success": True,
+                "message": f"Processados {len(arquivos_processados)} arquivos",
+                "arquivos": arquivos_processados
+            }
+
+        except Exception as e:
+            logger.error(f"Erro no processamento em lote: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     def _process_dataframe(self, df: pd.DataFrame, total_column: str) -> pd.DataFrame:
         # Processamento do DataFrame

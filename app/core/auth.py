@@ -117,7 +117,7 @@ class SharePointAuth:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    def baixar_arquivo_sharepoint(self, nome_arquivo: str, pasta_r189: str) -> Optional[BytesIO]:
+    def baixar_arquivo_sharepoint(self, nome_arquivo: str, pasta_r189: str) -> Optional[bytes]:
         """
         Baixa um arquivo específico do SharePoint.
         
@@ -126,7 +126,7 @@ class SharePointAuth:
             pasta_r189: Caminho da pasta no SharePoint
             
         Returns:
-            BytesIO contendo o arquivo ou None se houver erro
+            bytes contendo o arquivo ou None se houver erro
         """
         token = self.acquire_token()
         if not token:
@@ -142,7 +142,7 @@ class SharePointAuth:
         try:
             response = requests.get(url, headers=headers)
             if response.status_code == 200:
-                return BytesIO(response.content)
+                return response.content  # Retorna o conteúdo como bytes
             else:
                 logger.error(f"Erro ao baixar arquivo: {response.status_code}")
                 return None
@@ -264,3 +264,43 @@ class SharePointAuth:
         except Exception as e:
             logger.error(f"Erro na requisição SharePoint: {str(e)}")
             raise
+
+    async def enviar_arquivo_sharepoint(self, conteudo: bytes, nome_arquivo: str, pasta: str) -> bool:
+        """
+        Envia um arquivo para o SharePoint.
+        """
+        try:
+            token = self.acquire_token()
+            if not token:
+                raise Exception("Falha ao obter token para upload")
+
+            # Monta a URL para upload
+            url = f"{self.site_url}/_api/web/GetFolderByServerRelativeUrl('{pasta}')/Files/add(url='{nome_arquivo}',overwrite=true)"
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json;odata=verbose",
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(len(conteudo))
+            }
+
+            logger.info(f"Iniciando upload do arquivo {nome_arquivo} para {pasta}")
+            logger.debug(f"URL: {url}")
+            logger.debug(f"Tamanho do arquivo: {len(conteudo)} bytes")
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, data=conteudo) as response:
+                    texto = await response.text()
+                    logger.debug(f"Status do upload: {response.status}")
+                    logger.debug(f"Resposta do upload: {texto}")
+                    if response.status in [200, 201]:
+                        logger.info(f"Upload do arquivo {nome_arquivo} concluído com sucesso")
+                        return True
+                    else:
+                        logger.error(f"Erro ao enviar arquivo {nome_arquivo}. Status: {response.status}, Resposta: {texto}")
+                        return False
+
+        except Exception as e:
+            logger.error(f"Erro ao enviar arquivo para SharePoint: {str(e)}")
+            logger.error(traceback.format_exc())
+            return False

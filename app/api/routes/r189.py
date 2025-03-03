@@ -348,3 +348,25 @@ async def buscar_arquivos(tipo: str):
     except Exception as e:
         logger.error(f"Erro ao buscar arquivos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/processar/r189")
+async def processar_arquivos(files: List[str]):
+    """Processa os arquivos R189 selecionados."""
+    try:
+        extractor = R189Extractor()
+        resultado = await extractor.process_selected_files(files)
+        
+        if resultado["success"]:
+            return resultado
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=resultado["error"]
+            )
+            
+    except Exception as e:
+        logger.error(f"Erro ao processar arquivos: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
