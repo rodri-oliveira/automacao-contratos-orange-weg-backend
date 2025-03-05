@@ -176,7 +176,7 @@ class R189Extractor:
                     
                     if arquivo_consolidado:
                         # Nome do arquivo consolidado
-                        nome_consolidado = f"R189_consolidado_{uuid.uuid4().hex[:8]}.xlsx"
+                        nome_consolidado = f"R189_consolidado.xlsx"
                         logger.info(f"Arquivo consolidado gerado: {nome_consolidado}")
                         
                         # Converte BytesIO para bytes
