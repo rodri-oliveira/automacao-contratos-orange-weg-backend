@@ -63,9 +63,19 @@ function App() {
         }
 
         setLoading(true);
-        console.log('Iniciando processamento dos arquivos:', selectedFiles);
+        console.log('=== INICIANDO PROCESSAMENTO DOS ARQUIVOS ===');
+        console.log('Tipo de arquivo:', activeTab);
+        console.log('Arquivos selecionados:', selectedFiles);
 
-        const response = await fetch('http://localhost:8000/api/processar/r189', {
+        // Endpoint diferente dependendo do tipo de arquivo
+        const endpoint = activeTab === 'QPE' 
+            ? 'http://localhost:8000/qpe/process'
+            : 'http://localhost:8000/api/processar/r189';
+        
+        console.log('Usando endpoint:', endpoint);
+        console.log('Payload:', JSON.stringify(selectedFiles));
+
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -73,27 +83,32 @@ function App() {
             body: JSON.stringify(selectedFiles)
         });
 
+        console.log('Status da resposta:', response.status);
         const data = await response.json();
+        console.log('Dados da resposta:', data);
         
-        if (response.ok) {
+        if (data.success) {
+            console.log('Processamento concluído com sucesso');
             setStatus(prevStatus => ({
                 ...prevStatus,
-                R189: 'Processamento concluído'
+                [activeTab]: 'Processamento concluído'
             }));
-            setSelectedFiles([]); // Limpa a seleção após processamento
+            setSelectedFiles([]);
             alert('Arquivos processados com sucesso!');
         } else {
-            throw new Error(data.detail || 'Erro no processamento');
+            console.error('Erro na resposta:', data);
+            throw new Error(data.error || 'Erro no processamento');
         }
     } catch (error) {
-        console.error('Erro:', error);
+        console.error('Erro completo:', error);
         setStatus(prevStatus => ({
             ...prevStatus,
-            R189: 'Erro no processamento'
+            [activeTab]: 'Erro no processamento'
         }));
         setError(`Erro ao processar arquivos: ${error.message}`);
     } finally {
         setLoading(false);
+        console.log('=== FIM DO PROCESSAMENTO ===');
     }
 };
 

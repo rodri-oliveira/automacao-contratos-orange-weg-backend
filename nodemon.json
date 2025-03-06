@@ -1,0 +1,6 @@
+{
+    "watch": ["app/"],
+    "ext": ".py,.json",
+    "ignore": ["__pycache__", "*.pyc"],
+    "exec": "python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+}

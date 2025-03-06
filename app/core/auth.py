@@ -140,9 +140,11 @@ class SharePointAuth:
         }
 
         try:
+            logger.info(f"Baixando arquivo: {url}")
             response = requests.get(url, headers=headers)
             if response.status_code == 200:
-                return response.content  # Retorna o conteúdo como bytes
+                logger.info(f"Arquivo baixado com sucesso: {nome_arquivo}")
+                return response.content
             else:
                 logger.error(f"Erro ao baixar arquivo: {response.status_code}")
                 return None
@@ -270,8 +272,14 @@ class SharePointAuth:
         Envia um arquivo para o SharePoint.
         """
         try:
+            logger.info(f"=== INICIANDO UPLOAD PARA SHAREPOINT ===")
+            logger.info(f"Nome do arquivo: {nome_arquivo}")
+            logger.info(f"Pasta destino: {pasta}")
+            logger.info(f"Tamanho do conteúdo: {len(conteudo)} bytes")
+            
             token = self.acquire_token()
             if not token:
+                logger.error("Falha ao obter token para upload")
                 raise Exception("Falha ao obter token para upload")
 
             # Monta a URL para upload
@@ -284,23 +292,27 @@ class SharePointAuth:
                 "Content-Length": str(len(conteudo))
             }
 
-            logger.info(f"Iniciando upload do arquivo {nome_arquivo} para {pasta}")
-            logger.debug(f"URL: {url}")
-            logger.debug(f"Tamanho do arquivo: {len(conteudo)} bytes")
+            logger.info(f"URL de upload: {url}")
+            logger.info(f"Headers: {headers}")
             
             async with aiohttp.ClientSession() as session:
+                logger.info("Iniciando requisição POST")
                 async with session.post(url, headers=headers, data=conteudo) as response:
+                    status = response.status
+                    logger.info(f"Status da resposta: {status}")
+                    
                     texto = await response.text()
-                    logger.debug(f"Status do upload: {response.status}")
-                    logger.debug(f"Resposta do upload: {texto}")
-                    if response.status in [200, 201]:
+                    logger.info(f"Resposta: {texto[:500]}..." if len(texto) > 500 else texto)
+                    
+                    if status in [200, 201]:
                         logger.info(f"Upload do arquivo {nome_arquivo} concluído com sucesso")
                         return True
                     else:
-                        logger.error(f"Erro ao enviar arquivo {nome_arquivo}. Status: {response.status}, Resposta: {texto}")
+                        logger.error(f"Erro ao enviar arquivo {nome_arquivo}. Status: {status}")
+                        logger.error(f"Resposta completa: {texto}")
                         return False
 
         except Exception as e:
-            logger.error(f"Erro ao enviar arquivo para SharePoint: {str(e)}")
+            logger.error(f"Exceção ao enviar arquivo para SharePoint: {str(e)}")
             logger.error(traceback.format_exc())
             return False
