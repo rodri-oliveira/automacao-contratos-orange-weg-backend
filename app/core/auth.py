@@ -269,7 +269,15 @@ class SharePointAuth:
 
     async def enviar_arquivo_sharepoint(self, conteudo: bytes, nome_arquivo: str, pasta: str) -> bool:
         """
-        Envia um arquivo para o SharePoint.
+        Envia um arquivo para o SharePoint com sobrescrita explícita.
+        
+        Args:
+            conteudo: Bytes contendo o arquivo a ser enviado
+            nome_arquivo: Nome do arquivo no destino
+            pasta: Caminho relativo da pasta no SharePoint
+            
+        Returns:
+            bool indicando sucesso ou falha
         """
         try:
             logger.info(f"=== INICIANDO UPLOAD PARA SHAREPOINT ===")
@@ -282,7 +290,7 @@ class SharePointAuth:
                 logger.error("Falha ao obter token para upload")
                 raise Exception("Falha ao obter token para upload")
 
-            # Monta a URL para upload
+            # Monta a URL para upload com parâmetro de sobrescrita explícito
             url = f"{self.site_url}/_api/web/GetFolderByServerRelativeUrl('{pasta}')/Files/add(url='{nome_arquivo}',overwrite=true)"
             
             headers = {

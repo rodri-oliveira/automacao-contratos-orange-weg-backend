@@ -68,9 +68,24 @@ function App() {
         console.log('Arquivos selecionados:', selectedFiles);
 
         // Endpoint diferente dependendo do tipo de arquivo
-        const endpoint = activeTab === 'QPE' 
-            ? 'http://localhost:8000/qpe/process'
-            : 'http://localhost:8000/api/processar/r189';
+        let endpoint;
+        
+        switch(activeTab) {
+            case 'QPE':
+                endpoint = 'http://localhost:8000/qpe/process';
+                break;
+            case 'SPB':
+                endpoint = 'http://localhost:8000/spb/process';
+                break;
+            case 'NFSERV':
+                endpoint = 'http://localhost:8000/nfserv/process';
+                break;
+            case 'MUN_CODE':
+                endpoint = 'http://localhost:8000/mun_code/process';
+                break;
+            default:
+                endpoint = 'http://localhost:8000/api/processar/r189';
+        }
         
         console.log('Usando endpoint:', endpoint);
         console.log('Payload:', JSON.stringify(selectedFiles));

@@ -2,8 +2,10 @@ from fastapi import APIRouter, HTTPException, status
 from app.core.auth import SharePointAuth
 from app.core.extractors.spb_extractor import SPBExtractor
 import logging
+from typing import List
+import traceback
 
-router = APIRouter()
+router = APIRouter(prefix="/spb", tags=["SPB"])
 logger = logging.getLogger(__name__)
 
 @router.get("/api/arquivos/{tipo}")
@@ -56,3 +58,28 @@ async def buscar_arquivos(tipo: str):
     except Exception as e:
         logger.error(f"Erro ao buscar arquivos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/process")
+async def process_spb_files(files: List[str]):
+    """Processa os arquivos SPB selecionados."""
+    logger.info("=== INICIANDO PROCESSAMENTO DE ARQUIVOS SPB ===")
+    logger.info(f"Arquivos recebidos: {files}")
+    
+    try:
+        if not files:
+            logger.error("Nenhum arquivo selecionado")
+            return {"success": False, "error": "Nenhum arquivo selecionado"}
+            
+        logger.info("Criando instância do SPBExtractor")
+        spb_extractor = SPBExtractor()
+        
+        logger.info("Chamando process_selected_files")
+        result = await spb_extractor.process_selected_files(files)
+        logger.info(f"Resultado do processamento: {result}")
+        
+        return result
+            
+    except Exception as e:
+        logger.error(f"Erro ao processar arquivos SPB: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}

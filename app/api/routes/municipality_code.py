@@ -1,56 +1,34 @@
-from fastapi import APIRouter, HTTPException
-from app.core.auth import SharePointAuth
-from app.core.extractors.municipality_code_extractor import MunicipalityCodeExtractor
+from fastapi import APIRouter, HTTPException, status
+from typing import List
 import logging
+import traceback
 
-router = APIRouter()
+from app.core.extractors.municipality_code_extractor import MunicipalityCodeExtractor
+
+router = APIRouter(prefix="/mun_code", tags=["MUN_CODE"])
 logger = logging.getLogger(__name__)
 
-@router.get("/api/arquivos/{tipo}")
-async def buscar_arquivos(tipo: str):
-    """Busca arquivos Municipality Code no SharePoint."""
-    if tipo != "MUN_CODE":
-        raise HTTPException(status_code=400, detail="Tipo de arquivo inválido")
-        
+@router.post("/process")
+async def process_mun_code_files(files: List[str]):
+    """Processa os arquivos Municipality Code selecionados."""
+    logger.info("=== INICIANDO PROCESSAMENTO DE ARQUIVOS MUNICIPALITY CODE ===")
+    logger.info(f"Arquivos recebidos: {files}")
+    
     try:
-        auth = SharePointAuth()
-        token = auth.acquire_token()
-        
-        if not token:
-            raise HTTPException(status_code=401, detail="Falha na autenticação com SharePoint")
-
-        pasta = "/teams/BR-TI-TIN/AutomaoFinanas/R189"  # Usa a mesma pasta do R189
-        url = f"{auth.site_url}/_api/web/GetFolderByServerRelativeUrl('{pasta}')/Files"
-        
-        headers = {
-            "Accept": "application/json;odata=verbose",
-            "Authorization": f"Bearer {token}"
-        }
-        
-        response = await auth.fazer_requisicao_sharepoint(url, headers)
-        
-        if response.status_code == 200:
-            dados = response.json()
-            arquivos = dados.get('d', {}).get('results', [])
+        if not files:
+            logger.error("Nenhum arquivo selecionado")
+            return {"success": False, "error": "Nenhum arquivo selecionado"}
             
-            return {
-                "success": True,
-                "arquivos": [
-                    {
-                        "nome": arquivo["Name"],
-                        "tamanho": arquivo["Length"],
-                        "modificado": arquivo["TimeLastModified"]
-                    }
-                    for arquivo in arquivos
-                    if arquivo["Name"].lower().endswith('.xlsb')
-                ]
-            }
+        logger.info("Criando instância do MunicipalityCodeExtractor")
+        mun_code_extractor = MunicipalityCodeExtractor()
         
-        raise HTTPException(
-            status_code=response.status_code,
-            detail=f"Erro ao acessar SharePoint: {response.text}"
-        )
+        logger.info("Chamando process_selected_files")
+        result = await mun_code_extractor.process_selected_files(files)
+        logger.info(f"Resultado do processamento: {result}")
+        
+        return result
             
     except Exception as e:
-        logger.error(f"Erro ao buscar arquivos: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Erro ao processar arquivos Municipality Code: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
