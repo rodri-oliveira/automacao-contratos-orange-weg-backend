@@ -14,9 +14,23 @@ function App() {
     MUN_CODE: 'Aguardando processamento'
   });
   const [selectedFiles, setSelectedFiles] = useState([]);
+  
+  // Estado para controlar quais abas estão habilitadas
+  const [enabledTabs, setEnabledTabs] = useState({
+    R189: true,
+    QPE: false,
+    SPB: false,
+    NFSERV: false,
+    MUN_CODE: false
+  });
+  
+  // Estado para controlar se os botões de validação estão habilitados
+  const [validationEnabled, setValidationEnabled] = useState(false);
 
   const handleTabChange = (tab) => {
-    setActiveTab(tab);
+    if (enabledTabs[tab]) {
+      setActiveTab(tab);
+    }
   };
 
   const handleSearchFiles = useCallback(async () => {
@@ -69,22 +83,28 @@ function App() {
 
         // Endpoint diferente dependendo do tipo de arquivo
         let endpoint;
+        let nextTab;
         
         switch(activeTab) {
             case 'QPE':
                 endpoint = 'http://localhost:8000/qpe/process';
+                nextTab = 'SPB';
                 break;
             case 'SPB':
                 endpoint = 'http://localhost:8000/spb/process';
+                nextTab = 'NFSERV';
                 break;
             case 'NFSERV':
                 endpoint = 'http://localhost:8000/nfserv/process';
+                nextTab = 'MUN_CODE';
                 break;
             case 'MUN_CODE':
                 endpoint = 'http://localhost:8000/mun_code/process';
+                nextTab = 'R189'; // Volta para R189 após completar o ciclo
                 break;
             default:
                 endpoint = 'http://localhost:8000/api/processar/r189';
+                nextTab = 'QPE';
         }
         
         console.log('Usando endpoint:', endpoint);
@@ -108,6 +128,21 @@ function App() {
                 ...prevStatus,
                 [activeTab]: 'Processamento concluído'
             }));
+            
+            // Habilita a próxima aba após o sucesso
+            const newEnabledTabs = { ...enabledTabs };
+            
+            if (nextTab === 'R189' && activeTab === 'MUN_CODE') {
+                // Se completou o ciclo, habilita os botões de validação
+                setValidationEnabled(true);
+                setActiveTab('R189'); // Volta para a aba R189
+            } else {
+                // Caso contrário, habilita a próxima aba
+                newEnabledTabs[nextTab] = true;
+                setEnabledTabs(newEnabledTabs);
+                setActiveTab(nextTab); // Muda para a próxima aba
+            }
+            
             setSelectedFiles([]);
             alert('Arquivos processados com sucesso!');
         } else {
@@ -136,6 +171,18 @@ function App() {
       NFSERV: 'Aguardando processamento',
       MUN_CODE: 'Aguardando processamento'
     });
+    // Resetar as abas habilitadas para apenas R189
+    setEnabledTabs({
+      R189: true,
+      QPE: false,
+      SPB: false,
+      NFSERV: false,
+      MUN_CODE: false
+    });
+    // Desabilitar os botões de validação
+    setValidationEnabled(false);
+    // Voltar para a aba R189
+    setActiveTab('R189');
   };
 
   const handleFileSelection = (fileName) => {
@@ -147,7 +194,7 @@ function App() {
   };
 
   // Melhore a função handleSelectAll
-const handleSelectAll = () => {
+  const handleSelectAll = () => {
     if (selectedFiles.length === files.length) {
         // Se todos estão selecionados, desseleciona todos
         setSelectedFiles([]);
@@ -156,7 +203,7 @@ const handleSelectAll = () => {
         const allFileNames = files.map(file => file.nome);
         setSelectedFiles(allFileNames);
     }
-};
+  };
 
   const FileList = () => {
     if (error) return <div style={{color: 'red'}}>{error}</div>;
@@ -210,7 +257,7 @@ const handleSelectAll = () => {
             </table>
         </div>
     );
-};
+  };
 
   return (
     <div className="App">
@@ -226,8 +273,9 @@ const handleSelectAll = () => {
           {['R189', 'QPE', 'SPB', 'NFSERV', 'MUN_CODE'].map(tab => (
             <button
               key={tab}
-              className={`tab-button ${activeTab === tab ? 'active' : ''}`}
+              className={`tab-button ${activeTab === tab ? 'active' : ''} ${!enabledTabs[tab] ? 'disabled' : ''}`}
               onClick={() => handleTabChange(tab)}
+              disabled={!enabledTabs[tab]}
             >
               {tab}
             </button>
@@ -239,10 +287,14 @@ const handleSelectAll = () => {
             <div className="section-header">Arquivos</div>
             <div className="section-content">
               <div className="button-container">
-                <button className="action-button" onClick={handleSearchFiles}>
+                <button className="action-button" onClick={handleSearchFiles} disabled={loading}>
                   Buscar Arquivos
                 </button>
-                <button className="action-button" onClick={handleProcessFiles}>
+                <button 
+                  className="action-button" 
+                  onClick={handleProcessFiles} 
+                  disabled={loading || selectedFiles.length === 0}
+                >
                   Processar Arquivos
                 </button>
               </div>
@@ -259,18 +311,26 @@ const handleSelectAll = () => {
           <div className="section-container">
             <div className="section-header">Validações</div>
             <div className="section-content">
-              {activeTab === 'R189' && (
+              {validationEnabled ? (
                 <>
-                  <button className="validation-button" disabled>
+                  <button className="validation-button" onClick={() => console.log("Validação R189")}>
                     1. Verificar Divergências R189
                   </button>
-                  <button className="validation-button" disabled>
+                  <button className="validation-button" onClick={() => console.log("Validação QPE vs R189")}>
                     2. Verificar Divergências QPE vs R189
                   </button>
-                  <button className="validation-button" disabled>
+                  <button className="validation-button" onClick={() => console.log("Validação SPB vs R189")}>
                     3. Verificar Divergências SPB vs R189
                   </button>
+                  <button className="validation-button" onClick={() => console.log("Validação NFSERV vs R189")}>
+                    4. Verificar Divergências NFSERV vs R189
+                  </button>
+                  <button className="validation-button" onClick={() => console.log("Validação MUN_CODE vs R189")}>
+                    5. Verificar Divergências MUN_CODE vs R189
+                  </button>
                 </>
+              ) : (
+                <p>Complete o processamento de todos os arquivos para habilitar as validações.</p>
               )}
             </div>
           </div>

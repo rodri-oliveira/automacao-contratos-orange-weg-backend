@@ -278,3 +278,12 @@
 .selected-row {
   background-color: #e3f2fd;
 }
+
+.tab-button.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.validation-button:hover {
+  background-color: #e9ecef;
+}
