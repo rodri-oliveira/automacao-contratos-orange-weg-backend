@@ -370,3 +370,5 @@ async def processar_arquivos(files: List[str]):
             status_code=500,
             detail=str(e)
         )
+
+# atualizando 
