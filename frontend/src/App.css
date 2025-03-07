@@ -287,3 +287,42 @@
 .validation-button:hover {
   background-color: #e9ecef;
 }
+
+.tab-button.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.validation-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 15px;
+  margin-bottom: 5px;
+  background-color: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.validation-button:hover {
+  background-color: #e9ecef;
+}
+
+.empty-files-message {
+  text-align: center;
+  padding: 30px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  border: 1px dashed #ccc;
+  margin: 20px 0;
+  color: #6c757d;
+}
+
+.empty-files-message p {
+  margin-bottom: 10px;
+}
+
+.empty-files-message strong {
+  color: #005baa;
+}

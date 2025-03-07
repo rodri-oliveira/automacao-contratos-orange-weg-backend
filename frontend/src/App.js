@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import './App.css';
 
 function App() {
@@ -26,10 +26,32 @@ function App() {
   
   // Estado para controlar se os botões de validação estão habilitados
   const [validationEnabled, setValidationEnabled] = useState(false);
+  
+  // Estado para forçar a recriação do componente FileList
+  const [fileListKey, setFileListKey] = useState(0);
+
+  // Efeito para limpar os arquivos quando a aba mudar
+  useEffect(() => {
+    setFiles([]);
+    setSelectedFiles([]);
+    setError(null);
+    console.log('Aba alterada para:', activeTab, 'Arquivos limpos');
+  }, [activeTab]);
 
   const handleTabChange = (tab) => {
     if (enabledTabs[tab]) {
+      // Limpar arquivos
+      setFiles([]);
+      setSelectedFiles([]);
+      setError(null);
+      
+      // Mudar de aba
       setActiveTab(tab);
+      
+      // Forçar a recriação do componente FileList
+      setFileListKey(prevKey => prevKey + 1);
+      
+      console.log('Aba alterada manualmente para:', tab);
     }
   };
 
@@ -67,7 +89,7 @@ function App() {
     } finally {
         setLoading(false);
     }
-}, [activeTab]);
+  }, [activeTab]);
 
   const handleProcessFiles = async () => {
     try {
@@ -129,21 +151,29 @@ function App() {
                 [activeTab]: 'Processamento concluído'
             }));
             
-            // Habilita a próxima aba após o sucesso
-            const newEnabledTabs = { ...enabledTabs };
+            // Limpar completamente os arquivos
+            setFiles([]);
+            setSelectedFiles([]);
             
-            if (nextTab === 'R189' && activeTab === 'MUN_CODE') {
-                // Se completou o ciclo, habilita os botões de validação
+            // Forçar a recriação do componente FileList
+            setFileListKey(prevKey => prevKey + 1);
+            
+            // Atualizar as abas habilitadas e mudar para a próxima aba
+            if (activeTab === 'MUN_CODE') {
+                // Se completou o processamento da última aba, habilita os botões de validação
                 setValidationEnabled(true);
                 setActiveTab('R189'); // Volta para a aba R189
+                console.log('Habilitando botões de validação e voltando para R189');
             } else {
                 // Caso contrário, habilita a próxima aba
-                newEnabledTabs[nextTab] = true;
-                setEnabledTabs(newEnabledTabs);
-                setActiveTab(nextTab); // Muda para a próxima aba
+                setEnabledTabs(prevState => ({
+                    ...prevState,
+                    [nextTab]: true
+                }));
+                setActiveTab(nextTab);
+                console.log('Habilitando próxima aba:', nextTab);
             }
             
-            setSelectedFiles([]);
             alert('Arquivos processados com sucesso!');
         } else {
             console.error('Erro na resposta:', data);
@@ -160,10 +190,12 @@ function App() {
         setLoading(false);
         console.log('=== FIM DO PROCESSAMENTO ===');
     }
-};
+  };
 
   const handleResetProcess = () => {
     setFiles([]);
+    setSelectedFiles([]);
+    setError(null);
     setStatus({
       R189: 'Aguardando processamento',
       QPE: 'Aguardando processamento',
@@ -183,6 +215,10 @@ function App() {
     setValidationEnabled(false);
     // Voltar para a aba R189
     setActiveTab('R189');
+    // Forçar a recriação do componente FileList
+    setFileListKey(prevKey => prevKey + 1);
+    
+    console.log('Processo resetado');
   };
 
   const handleFileSelection = (fileName) => {
@@ -193,7 +229,6 @@ function App() {
     }
   };
 
-  // Melhore a função handleSelectAll
   const handleSelectAll = () => {
     if (selectedFiles.length === files.length) {
         // Se todos estão selecionados, desseleciona todos
@@ -207,7 +242,14 @@ function App() {
 
   const FileList = () => {
     if (error) return <div style={{color: 'red'}}>{error}</div>;
-    if (files.length === 0 && !error && !loading) return null;
+    if (files.length === 0 && !error && !loading) {
+      return (
+        <div className="empty-files-message">
+          <p>Nenhum arquivo carregado. Clique em "Buscar Arquivos" para listar os arquivos disponíveis para esta etapa.</p>
+          <p>Aba atual: <strong>{activeTab}</strong></p>
+        </div>
+      );
+    }
     if (files.length === 0) return <div>Nenhum arquivo encontrado</div>;
 
     return (
@@ -217,7 +259,7 @@ function App() {
                     <input
                         type="checkbox"
                         className="select-all-checkbox"
-                        checked={selectedFiles.length === files.length}
+                        checked={selectedFiles.length === files.length && files.length > 0}
                         onChange={handleSelectAll}
                     />
                     <span>Selecionar Todos</span>
@@ -249,7 +291,7 @@ function App() {
                                 />
                             </td>
                             <td>{file.nome}</td>
-                            <td>{(file.tamanho / 1024).toFixed(2)} KB</td>
+                            <td>{(file.tamanho / 1024).toFixed(2)} KB}</td>
                             <td>{new Date(file.modificado).toLocaleString()}</td>
                         </tr>
                     ))}
@@ -300,10 +342,9 @@ function App() {
               </div>
               
               {loading && <p>Carregando...</p>}
-              {!loading && error && <p className="error-message">{error}</p>}
               
               <div className="files-section">
-                {!loading && <FileList />}
+                {!loading && <FileList key={fileListKey} />}
               </div>
             </div>
           </div>
@@ -313,20 +354,20 @@ function App() {
             <div className="section-content">
               {validationEnabled ? (
                 <>
+                  <button className="validation-button" onClick={() => console.log("Validação MUN_CODE vs R189")}>
+                    1. Verificar Divergências MUN_CODE vs R189
+                  </button>
                   <button className="validation-button" onClick={() => console.log("Validação R189")}>
-                    1. Verificar Divergências R189
+                    2. Verificar Divergências R189
                   </button>
                   <button className="validation-button" onClick={() => console.log("Validação QPE vs R189")}>
-                    2. Verificar Divergências QPE vs R189
+                    3. Verificar Divergências QPE vs R189
                   </button>
                   <button className="validation-button" onClick={() => console.log("Validação SPB vs R189")}>
-                    3. Verificar Divergências SPB vs R189
+                    4. Verificar Divergências SPB vs R189
                   </button>
                   <button className="validation-button" onClick={() => console.log("Validação NFSERV vs R189")}>
-                    4. Verificar Divergências NFSERV vs R189
-                  </button>
-                  <button className="validation-button" onClick={() => console.log("Validação MUN_CODE vs R189")}>
-                    5. Verificar Divergências MUN_CODE vs R189
+                    5. Verificar Divergências NFSERV vs R189
                   </button>
                 </>
               ) : (
