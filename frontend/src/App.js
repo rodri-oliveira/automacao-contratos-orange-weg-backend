@@ -354,7 +354,34 @@ function App() {
             <div className="section-content">
               {validationEnabled ? (
                 <>
-                  <button className="validation-button" onClick={() => console.log("Validação MUN_CODE vs R189")}>
+                  <button 
+                    className="validation-button" 
+                    onClick={async () => {
+                      try {
+                        // Mostrar mensagem de carregamento
+                        alert("Iniciando validação MUN_CODE vs R189...");
+                        
+                        // Fazer a chamada à API
+                        const response = await fetch('http://localhost:8000/api/validation/mun_code_r189', {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                          }
+                        });
+                        
+                        // Processar a resposta
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                          alert(data.message || 'Validação concluída com sucesso!');
+                        } else {
+                          alert(`Erro na validação: ${data.error || 'Erro desconhecido'}`);
+                        }
+                      } catch (error) {
+                        alert(`Erro ao executar validação: ${error.message}`);
+                      }
+                    }}
+                  >
                     1. Verificar Divergências MUN_CODE vs R189
                   </button>
                   <button className="validation-button" onClick={() => console.log("Validação R189")}>
