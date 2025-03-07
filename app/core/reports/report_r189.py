@@ -6,7 +6,7 @@ from app.core.auth import SharePointAuth
 
 logger = logging.getLogger(__name__)
 
-class DivergenceReportR189:
+class ReportR189:
     """
     Classe responsável por verificar divergências no arquivo R189.
     """
@@ -350,4 +350,4 @@ class DivergenceReportR189:
             return {
                 "success": False,
                 "error": f"Erro ao gerar relatório: {str(e)}"
-            }
+            } 

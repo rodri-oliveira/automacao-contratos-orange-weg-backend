@@ -359,10 +359,10 @@ function App() {
                     onClick={async () => {
                       try {
                         // Mostrar mensagem de carregamento
-                        alert("Iniciando validação MUN_CODE vs R189...");
+                        alert("Iniciando validação R189...");
                         
                         // Fazer a chamada à API
-                        const response = await fetch('http://localhost:8000/api/validation/mun_code_r189', {
+                        const response = await fetch('http://localhost:8000/api/validation/r189', {
                           method: 'POST',
                           headers: {
                             'Content-Type': 'application/json',
@@ -382,9 +382,6 @@ function App() {
                       }
                     }}
                   >
-                    1. Verificar Divergências MUN_CODE vs R189
-                  </button>
-                  <button className="validation-button" onClick={() => console.log("Validação R189")}>
                     2. Verificar Divergências R189
                   </button>
                   <button className="validation-button" onClick={() => console.log("Validação QPE vs R189")}>
