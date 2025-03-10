@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import r189, qpe, spb, nfserv, municipality_code, validation
+from app.api.routes import r189, qpe, spb, nfserv, municipality_code
 
 app = FastAPI(
     title="Automação Finanças API",
@@ -18,13 +18,8 @@ app.add_middleware(
 )
 
 # Depois adicionar as rotas
-app.include_router(r189.router, prefix="/api/r189", tags=["R189"])
-app.include_router(qpe.router, prefix="/api/qpe", tags=["QPE"])
-app.include_router(spb.router, prefix="/api/spb", tags=["SPB"])
-app.include_router(nfserv.router, prefix="/api/nfserv", tags=["NFSERV"])
-app.include_router(municipality_code.router, prefix="/api/municipality_code", tags=["Municipality Code"])
-app.include_router(validation.router, prefix="/api/validation", tags=["Validation"])
-
-@app.get("/")
-async def root():
-    return {"message": "Automação Finanças API"}
+app.include_router(r189.router)
+app.include_router(qpe.router)
+app.include_router(spb.router)
+app.include_router(nfserv.router)
+app.include_router(municipality_code.router)
