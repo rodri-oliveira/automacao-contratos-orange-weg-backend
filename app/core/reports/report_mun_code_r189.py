@@ -24,6 +24,8 @@ class ReportMunCodeR189:
             "14.01": {"material": "80001097", "type": "LUBRIFICACAO, LIMPEZA"},
             "1.07": {"material": "80001019", "type": "SUPORTE TECNICO EM INFORMATICA"},
             "3115": {"material": "80001110", "type": "Assessoria E Consultoria"},
+            3115: {"material": "80001110", "type": "Assessoria E Consultoria"},  # Adicionando como inteiro
+            "3115.0": {"material": "80001110", "type": "Assessoria E Consultoria"},  # Adicionando como string de float
             "1880": {"material": "80001098", "type": "Assistência Técnica - Instalação"},
             "1.03": {"material": "80001680", "type": "Processamento e Armazenamento"}
         }
@@ -205,17 +207,38 @@ class ReportMunCodeR189:
             def get_material_and_type(row):
                 try:
                     # Pega o código do serviço (antes do hífen, se houver)
-                    service_code = str(row['Municipality Code']).strip().split(' - ')[0].strip()
+                    service_code = str(row['Municipality Code']).strip()
                     
-                    # Busca no mapeamento
+                    # Log para debug
+                    logger.debug(f"Processando código: '{service_code}', tipo: {type(service_code)}")
+                    
+                    # Verificar se o código está no mapeamento
                     if service_code in self.service_mapping:
+                        logger.debug(f"Código '{service_code}' encontrado no mapeamento")
                         return pd.Series([
                             self.service_mapping[service_code]['material'],
                             self.service_mapping[service_code]['type']
                         ])
+                    
+                    # Se não encontrou diretamente, tenta outras formas
+                    for key in self.service_mapping.keys():
+                        if str(key) == str(service_code):
+                            logger.debug(f"Código '{service_code}' corresponde a '{key}' após conversão")
+                            return pd.Series([
+                                self.service_mapping[key]['material'],
+                                self.service_mapping[key]['type']
+                            ])
+                    
+                    # Caso específico para 3115
+                    if service_code == "3115":
+                        logger.debug("Aplicando mapeamento direto para código 3115")
+                        return pd.Series(["80001110", "Assessoria E Consultoria"])
+                    
+                    logger.warning(f"Código '{service_code}' não encontrado no mapeamento")
                     return pd.Series(['', ''])
                 except Exception as e:
                     logger.error(f"Erro ao processar código de serviço {service_code}: {str(e)}")
+                    logger.error(traceback.format_exc())
                     return pd.Series(['', ''])
             
             # Aplica o mapeamento para criar as novas colunas
