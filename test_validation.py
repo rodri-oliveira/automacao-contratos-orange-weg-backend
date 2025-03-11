@@ -19,4 +19,4 @@ def test_validate_mun_code_r189():
         print(f"Erro na validação: {data['error']}")
     else:
         assert "message" in data
-        print(f"Mensagem de sucesso: {data['message']}") 
+        print(f"Mensagem de sucesso: {data['message']}")

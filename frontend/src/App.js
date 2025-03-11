@@ -74,7 +74,7 @@ function App() {
         console.log('Dados:', data);
 
         if (response.ok) {
-            if (data.success && data.arquivos) {
+            if (data.arquivos) {
                 setFiles(data.arquivos);
             } else {
                 throw new Error(data.detail || 'Erro desconhecido');
@@ -240,6 +240,271 @@ function App() {
     }
   };
 
+  // Funções de validação
+  const handleValidationMunCodeR189 = async () => {
+    try {
+      console.log("Iniciando validação MUN_CODE vs R189");
+      setLoading(true);
+      setError(null);
+      
+      // Atualizar o status para indicar que está em processamento
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        MUN_CODE: 'Validando MUN_CODE vs R189...'
+      }));
+      
+      const response = await fetch('http://localhost:8000/api/validations/mun_code_r189', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('Status da resposta:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`Erro na validação, ${response.status} (${response.statusText})`);
+      }
+      
+      const data = await response.json();
+      console.log('Dados da resposta:', data);
+      
+      if (data.success) {
+        // Atualizar o status para indicar sucesso
+        setStatus(prevStatus => ({
+          ...prevStatus,
+          MUN_CODE: 'Validação concluída com sucesso'
+        }));
+        
+        // Exibir mensagem de sucesso
+        alert(data.message || 'Validação concluída com sucesso!');
+      } else {
+        throw new Error(data.error || 'Erro na validação');
+      }
+    } catch (error) {
+      console.error('Erro completo:', error);
+      
+      // Atualizar o status para indicar erro
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        MUN_CODE: 'Erro na validação'
+      }));
+      
+      setError(`Erro na validação MUN_CODE vs R189: ${error.message}`);
+      alert(`Erro na validação: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleValidationR189 = async () => {
+    try {
+      console.log("Iniciando validação R189");
+      setLoading(true);
+      setError(null);
+      
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        R189: 'Validando R189...'
+      }));
+      
+      const response = await fetch('http://localhost:8000/api/validations/r189', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('Status da resposta:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`Erro na validação, ${response.status} (${response.statusText})`);
+      }
+      
+      const data = await response.json();
+      console.log('Dados da resposta:', data);
+      
+      if (data.success) {
+        setStatus(prevStatus => ({
+          ...prevStatus,
+          R189: 'Validação concluída com sucesso'
+        }));
+        
+        alert(data.message || 'Validação concluída com sucesso!');
+      } else {
+        throw new Error(data.error || 'Erro na validação');
+      }
+    } catch (error) {
+      console.error('Erro completo:', error);
+      
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        R189: 'Erro na validação'
+      }));
+      
+      setError(`Erro na validação R189: ${error.message}`);
+      alert(`Erro na validação: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleValidationQpeR189 = async () => {
+    try {
+      console.log("Iniciando validação QPE vs R189");
+      setLoading(true);
+      setError(null);
+      
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        QPE: 'Validando QPE vs R189...'
+      }));
+      
+      const response = await fetch('http://localhost:8000/api/validations/qpe_r189', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('Status da resposta:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`Erro na validação, ${response.status} (${response.statusText})`);
+      }
+      
+      const data = await response.json();
+      console.log('Dados da resposta:', data);
+      
+      if (data.success) {
+        setStatus(prevStatus => ({
+          ...prevStatus,
+          QPE: 'Validação concluída com sucesso'
+        }));
+        
+        alert(data.message || 'Validação concluída com sucesso!');
+      } else {
+        throw new Error(data.error || 'Erro na validação');
+      }
+    } catch (error) {
+      console.error('Erro completo:', error);
+      
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        QPE: 'Erro na validação'
+      }));
+      
+      setError(`Erro na validação QPE vs R189: ${error.message}`);
+      alert(`Erro na validação: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleValidationSpbR189 = async () => {
+    try {
+      console.log("Iniciando validação SPB vs R189");
+      setLoading(true);
+      setError(null);
+      
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        SPB: 'Validando SPB vs R189...'
+      }));
+      
+      const response = await fetch('http://localhost:8000/api/validations/spb_r189', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('Status da resposta:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`Erro na validação, ${response.status} (${response.statusText})`);
+      }
+      
+      const data = await response.json();
+      console.log('Dados da resposta:', data);
+      
+      if (data.success) {
+        setStatus(prevStatus => ({
+          ...prevStatus,
+          SPB: 'Validação concluída com sucesso'
+        }));
+        
+        alert(data.message || 'Validação concluída com sucesso!');
+      } else {
+        throw new Error(data.error || 'Erro na validação');
+      }
+    } catch (error) {
+      console.error('Erro completo:', error);
+      
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        SPB: 'Erro na validação'
+      }));
+      
+      setError(`Erro na validação SPB vs R189: ${error.message}`);
+      alert(`Erro na validação: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleValidationNfservR189 = async () => {
+    try {
+      console.log("Iniciando validação NFSERV vs R189");
+      setLoading(true);
+      setError(null);
+      
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        NFSERV: 'Validando NFSERV vs R189...'
+      }));
+      
+      const response = await fetch('http://localhost:8000/api/validations/nfserv_r189', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('Status da resposta:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`Erro na validação, ${response.status} (${response.statusText})`);
+      }
+      
+      const data = await response.json();
+      console.log('Dados da resposta:', data);
+      
+      if (data.success) {
+        setStatus(prevStatus => ({
+          ...prevStatus,
+          NFSERV: 'Validação concluída com sucesso'
+        }));
+        
+        alert(data.message || 'Validação concluída com sucesso!');
+      } else {
+        throw new Error(data.error || 'Erro na validação');
+      }
+    } catch (error) {
+      console.error('Erro completo:', error);
+      
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        NFSERV: 'Erro na validação'
+      }));
+      
+      setError(`Erro na validação NFSERV vs R189: ${error.message}`);
+      alert(`Erro na validação: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const FileList = () => {
     if (error) return <div style={{color: 'red'}}>{error}</div>;
     if (files.length === 0 && !error && !loading) {
@@ -354,19 +619,19 @@ function App() {
             <div className="section-content">
               {validationEnabled ? (
                 <>
-                  <button className="validation-button" onClick={() => console.log("Validação MUN_CODE vs R189")}>
+                  <button className="validation-button" onClick={handleValidationMunCodeR189}>
                     1. Verificar Divergências MUN_CODE vs R189
                   </button>
-                  <button className="validation-button" onClick={() => console.log("Validação R189")}>
+                  <button className="validation-button" onClick={handleValidationR189}>
                     2. Verificar Divergências R189
                   </button>
-                  <button className="validation-button" onClick={() => console.log("Validação QPE vs R189")}>
+                  <button className="validation-button" onClick={handleValidationQpeR189}>
                     3. Verificar Divergências QPE vs R189
                   </button>
-                  <button className="validation-button" onClick={() => console.log("Validação SPB vs R189")}>
+                  <button className="validation-button" onClick={handleValidationSpbR189}>
                     4. Verificar Divergências SPB vs R189
                   </button>
-                  <button className="validation-button" onClick={() => console.log("Validação NFSERV vs R189")}>
+                  <button className="validation-button" onClick={handleValidationNfservR189}>
                     5. Verificar Divergências NFSERV vs R189
                   </button>
                 </>

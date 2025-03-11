@@ -88,7 +88,7 @@ class R189Extractor:
                 "details": str(e)
             }
 
-    async def consolidar_r189(self, conteudo: BytesIO) -> BytesIO:
+    def consolidar_r189(self, conteudo: BytesIO) -> BytesIO:
         """Consolida um arquivo R189."""
         try:
             logger.info("Iniciando consolidação do arquivo R189")
@@ -102,17 +102,17 @@ class R189Extractor:
                 header=12
             )
             
+            logger.info("Arquivo lido com sucesso")
+
             # Verifica se a aba 'BRASIL' existe
             if 'BRASIL' not in df:
-                raise ValueError("A aba 'BRASIL' não foi encontrada no arquivo Excel.")
-            
-            # Obtém os dados apenas da aba 'BRASIL'
+                raise ValueError("Aba 'BRASIL' não encontrada")
+
+            # Processa os dados
             df_brasil = df['BRASIL']
-
-            # Combina todas as abas em um único DataFrame
             df_consolidado = df_brasil.copy()
-
-            # Seleciona apenas as colunas necessárias
+            
+            # Seleciona e verifica colunas
             colunas_necessarias = [
                 'CNPJ - WEG',
                 'Invoice number',
@@ -121,40 +121,26 @@ class R189Extractor:
                 'Account number'
             ]
             
-            # Verifica se todas as colunas necessárias existem
             colunas_faltantes = [col for col in colunas_necessarias if col not in df_consolidado.columns]
             if colunas_faltantes:
-                raise ValueError(f"Colunas faltantes no arquivo Excel: {colunas_faltantes}")
+                raise ValueError(f"Colunas faltantes: {colunas_faltantes}")
             
-            # Seleciona apenas as colunas necessárias
+            # Processa o DataFrame
             df_resultado = df_consolidado[colunas_necessarias].copy()
+            df_resultado = df_resultado.groupby(
+                ['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2'], 
+                as_index=False
+            )['Total Geral'].sum()
             
-            # Identifica linhas onde Account number NÃO contém a string 'Total'
-            linhas_sem_total = ~df_resultado['Account number'].astype(str).str.contains('Total', na=True)
-            
-            # Aplica o ffill apenas nas linhas onde Account number NÃO contém 'Total'
-            df_resultado.loc[linhas_sem_total, 'Invoice number'] = df_resultado.loc[linhas_sem_total, 'Invoice number'].ffill()
-            
-            # Preenche outros valores vazios
-            df_resultado[['CNPJ - WEG', 'Site Name - WEG 2']] = df_resultado[['CNPJ - WEG', 'Site Name - WEG 2']].ffill()
-            
-            # Remove linhas que ainda possuem valores NaN nas colunas principais
-            df_resultado = df_resultado.dropna(subset=['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2', 'Total Geral'])
-
-            # Remove a coluna Account number antes do agrupamento
-            df_resultado = df_resultado.drop('Account number', axis=1)
-
-            # Agrupa por todas as colunas exceto 'Total Geral' e soma os valores
-            df_resultado = df_resultado.groupby(['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2'], as_index=False)['Total Geral'].sum()
-
-            # Gera o arquivo consolidado em formato BytesIO
-            arquivo_consolidado = BytesIO()
-            with pd.ExcelWriter(arquivo_consolidado, engine='xlsxwriter') as writer:
+            # Gera arquivo Excel
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_resultado.to_excel(writer, index=False, sheet_name='Consolidado_R189')
             
-            arquivo_consolidado.seek(0)
-            return arquivo_consolidado
-            
+            output.seek(0)
+            logger.info("Consolidação concluída com sucesso")
+            return output
+
         except Exception as e:
             logger.error(f"Erro ao consolidar R189: {str(e)}")
             logger.error(traceback.format_exc())
@@ -186,7 +172,7 @@ class R189Extractor:
                         continue
 
                     # Consolida o arquivo
-                    arquivo_consolidado = await self.consolidar_r189(content)
+                    arquivo_consolidado = self.consolidar_r189(content)
                     
                     if arquivo_consolidado:
                         # Nome do arquivo consolidado

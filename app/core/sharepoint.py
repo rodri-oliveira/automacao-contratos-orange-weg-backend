@@ -122,7 +122,7 @@ class SharePointClient:
             return None
 
     async def upload_file(self, file_content: BytesIO, destination_name: str, folder_path: str) -> bool:
-        """Upload a file to SharePoint"""
+        """Upload a file to SharePoint asynchronously"""
         try:
             token = self.auth.acquire_token()
             if not token:
@@ -139,12 +139,24 @@ class SharePointClient:
                 "Content-Type": "application/octet-stream"
             }
 
-            response = requests.post(url, data=file_content.getvalue(), headers=headers)
-            response.raise_for_status()
+            session = await self._get_session()
             
-            return True
+            self.logger.info(f"Enviando arquivo para: {url}")
+            self.logger.info(f"Tamanho do arquivo: {file_content.getbuffer().nbytes} bytes")
+            
+            async with session.post(url, data=file_content.getvalue(), headers=headers) as response:
+                if response.status in [200, 201]:
+                    self.logger.info(f"Arquivo {destination_name} enviado com sucesso")
+                    return True
+                else:
+                    self.logger.error(f"Erro ao enviar arquivo. Status: {response.status}")
+                    response_text = await response.text()
+                    self.logger.error(f"Resposta: {response_text}")
+                    return False
             
         except Exception as e:
             self.logger.error(f"Error uploading file: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return False
 
