@@ -36,25 +36,22 @@ async def validate_mun_code_r189():
 @router.post("/r189")
 async def validate_r189():
     """
-    Executa a validação do R189
+    Valida os dados do R189 e gera relatório de divergências.
     """
+    logger.info("=== INICIANDO VALIDAÇÃO R189 ===")
     try:
-        logger.info("=== INICIANDO VALIDAÇÃO R189 ===")
         validator = DivergenceReportR189()
-        result = await validator.check_divergences()
+        result = await validator.generate_report()
         
-        if result["success"] and result.get("divergences"):
-            report_result = await validator.generate_excel_report(result["divergences"])
-            return report_result
-        
-        return result
+        if result["success"]:
+            logger.info(f"Validação R189 concluída com sucesso: {result.get('message')}")
+            return {"success": True, "message": result.get("message")}
+        else:
+            logger.error(f"Erro na validação R189: {result.get('error')}")
+            return {"success": False, "error": result.get("error")}
     except Exception as e:
-        logger.error(f"Erro na validação R189: {str(e)}")
-        logger.error(traceback.format_exc())
-        return {
-            "success": False,
-            "error": f"Erro na validação: {str(e)}"
-        }
+        logger.exception(f"Erro na validação R189: {str(e)}")
+        return {"success": False, "error": f"Erro na validação R189: {str(e)}"}
 
 @router.post("/qpe_r189")
 async def validate_qpe_r189():
