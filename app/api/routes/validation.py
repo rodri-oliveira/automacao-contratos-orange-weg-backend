@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 import logging
 import traceback
+from typing import Dict, Any
 
 from app.core.reports.report_mun_code_r189 import ReportMunCodeR189
 from app.core.reports.divergence_report_qpe_r189 import DivergenceReportQPER189
@@ -53,27 +54,25 @@ async def validate_r189():
         logger.exception(f"Erro na validação R189: {str(e)}")
         return {"success": False, "error": f"Erro na validação R189: {str(e)}"}
 
-@router.post("/qpe_r189")
+@router.post("/qpe_r189", response_model=Dict[str, Any])
 async def validate_qpe_r189():
     """
-    Executa a validação entre QPE e R189
+    Valida divergências entre QPE e R189.
     """
     try:
-        logger.info("=== INICIANDO VALIDAÇÃO QPE vs R189 ===")
+        logger.info("Iniciando validação QPE vs R189")
         validator = DivergenceReportQPER189()
-        result = await validator.check_divergences()
         
-        if result["success"] and result.get("divergences"):
-            report_result = await validator.generate_excel_report(result["divergences"])
-            return report_result
+        result = await validator.generate_report()
         
+        logger.info(f"Validação QPE vs R189 concluída: {result}")
         return result
     except Exception as e:
-        logger.error(f"Erro na validação QPE vs R189: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.exception(f"Erro na validação QPE vs R189: {str(e)}")
         return {
             "success": False,
-            "error": f"Erro na validação: {str(e)}"
+            "error": f"Erro na validação: {str(e)}",
+            "show_popup": True
         }
 
 @router.post("/spb_r189")
