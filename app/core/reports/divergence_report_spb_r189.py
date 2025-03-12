@@ -349,9 +349,39 @@ class DivergenceReportSPBR189:
                 r189_io = BytesIO(r189_content)
                 nfserv_io = BytesIO(nfserv_content)
                 
-                df_spb = pd.read_excel(spb_io, sheet_name='Consolidado_SPB')
-                df_r189 = pd.read_excel(r189_io, sheet_name='Consolidado_R189')
-                df_nfserv = pd.read_excel(nfserv_io, sheet_name='Consolidado_NFSERV')
+                # Listar todas as planilhas disponíveis nos arquivos
+                spb_excel = pd.ExcelFile(spb_io)
+                spb_sheets = spb_excel.sheet_names
+                logger.info(f"Planilhas disponíveis em SPB_consolidado.xlsx: {spb_sheets}")
+                
+                r189_excel = pd.ExcelFile(r189_io)
+                r189_sheets = r189_excel.sheet_names
+                logger.info(f"Planilhas disponíveis em R189_consolidado.xlsx: {r189_sheets}")
+                
+                nfserv_excel = pd.ExcelFile(nfserv_io)
+                nfserv_sheets = nfserv_excel.sheet_names
+                logger.info(f"Planilhas disponíveis em NFSERV_consolidado.xlsx: {nfserv_sheets}")
+                
+                # Reabrir os BytesIO pois foram consumidos pelo ExcelFile
+                spb_io = BytesIO(spb_content)
+                r189_io = BytesIO(r189_content)
+                nfserv_io = BytesIO(nfserv_content)
+                
+                # Usar o nome correto da planilha 'SPB_Consolidado' em vez de 'Consolidado_SPB'
+                df_spb = pd.read_excel(spb_io, sheet_name='SPB_Consolidado')
+                
+                # Usar a primeira planilha disponível para R189 e NFSERV se as específicas não existirem
+                if 'Consolidado_R189' in r189_sheets:
+                    df_r189 = pd.read_excel(r189_io, sheet_name='Consolidado_R189')
+                else:
+                    df_r189 = pd.read_excel(r189_io, sheet_name=r189_sheets[0])
+                    logger.info(f"Usando planilha alternativa para R189: {r189_sheets[0]}")
+                
+                if 'Consolidado_NFSERV' in nfserv_sheets:
+                    df_nfserv = pd.read_excel(nfserv_io, sheet_name='Consolidado_NFSERV')
+                else:
+                    df_nfserv = pd.read_excel(nfserv_io, sheet_name=nfserv_sheets[0])
+                    logger.info(f"Usando planilha alternativa para NFSERV: {nfserv_sheets[0]}")
                 
                 logger.info(f"Linhas em SPB: {len(df_spb)}")
                 logger.info(f"Linhas em R189: {len(df_r189)}")

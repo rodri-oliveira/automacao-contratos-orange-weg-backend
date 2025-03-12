@@ -75,7 +75,7 @@ async def validate_qpe_r189():
             "show_popup": True
         }
 
-@router.post("/spb_r189")
+@router.post("/spb_r189", response_model=Dict[str, Any])
 async def validate_spb_r189():
     """
     Valida divergências entre SPB e R189.
@@ -98,30 +98,19 @@ async def validate_spb_r189():
 @router.post("/nfserv_r189")
 async def validate_nfserv_r189():
     """
-    Executa a validação entre NFSERV e R189
+    Valida divergências entre NFSERV e R189.
     """
     try:
-        logger.info("=== INICIANDO VALIDAÇÃO NFSERV vs R189 ===")
+        logger.info("Iniciando validação NFSERV vs R189")
         validator = DivergenceReportNFSERVR189()
-        result = await validator.check_divergences()
+        result = await validator.generate_report()
         
-        if result["success"] and result.get("divergences"):
-            report_result = await validator.generate_excel_report(result["divergences"])
-            return report_result
-        
-        if not result["success"]:
-            logger.error(f"Erro ao gerar relatório: {result.get('error')}")
-            return {
-                "success": False,
-                "error": result.get("error"),
-                "show_popup": True
-            }
-        
+        logger.info(f"Validação NFSERV vs R189 concluída: {result}")
         return result
     except Exception as e:
-        logger.error(f"Erro na validação NFSERV vs R189: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.exception(f"Erro na validação NFSERV vs R189: {str(e)}")
         return {
             "success": False,
-            "error": f"Erro na validação: {str(e)}"
+            "error": f"Erro na validação: {str(e)}",
+            "show_popup": True
         }
