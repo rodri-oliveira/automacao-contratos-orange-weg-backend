@@ -1,5 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import './App.css';
+// Importar a logo da WEG
+import wegLogo from './assets/weg-logo.png';
 
 function App() {
   const [activeTab, setActiveTab] = useState('R189');
@@ -30,6 +32,56 @@ function App() {
   // Estado para forçar a recriação do componente FileList
   const [fileListKey, setFileListKey] = useState(0);
 
+  // NOVO: Estado para controlar a empresa selecionada
+  const [selectedCompany, setSelectedCompany] = useState(null);
+  
+  // NOVO: Lista de empresas disponíveis
+  const companies = [
+    { id: 'orange', name: 'Orange', color: '#00579d' },
+    // Empresas futuras podem ser adicionadas aqui
+    { id: 'future1', name: 'Empresa Futura 1', color: '#00579d' },
+    { id: 'future2', name: 'Empresa Futura 2', color: '#00579d' },
+  ];
+
+  // NOVO: Estado para controlar a visibilidade do modal de confirmação
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  
+  // NOVO: Função para selecionar empresa
+  const handleCompanySelect = (companyId) => {
+    // Se clicar na mesma empresa, não faz nada
+    if (selectedCompany === companyId) return;
+    
+    // Se clicar em uma empresa diferente da Orange, mostra alerta
+    if (companyId !== 'orange' && companyId !== null) {
+      window.alert('Esta empresa será implementada em breve.');
+      return;
+    }
+    
+    setSelectedCompany(companyId);
+    
+    // Resetar o processo ao mudar de empresa
+    if (companyId === null) {
+      handleResetProcess();
+    }
+  };
+
+  // NOVO: Função para voltar ao dashboard
+  const handleBackButtonClick = () => {
+    setShowConfirmModal(true);
+  };
+
+  // NOVO: Função para confirmar o retorno ao dashboard
+  const confirmBackToDashboard = () => {
+    setSelectedCompany(null);
+    handleResetProcess();
+    setShowConfirmModal(false);
+  };
+
+  // NOVO: Função para cancelar o retorno ao dashboard
+  const cancelBackToDashboard = () => {
+    setShowConfirmModal(false);
+  };
+
   // Efeito para limpar os arquivos quando a aba mudar
   useEffect(() => {
     setFiles([]);
@@ -46,7 +98,7 @@ function App() {
       setError(null);
       
       // Mudar de aba
-      setActiveTab(tab);
+    setActiveTab(tab);
       
       // Forçar a recriação do componente FileList
       setFileListKey(prevKey => prevKey + 1);
@@ -89,7 +141,7 @@ function App() {
     } finally {
         setLoading(false);
     }
-  }, [activeTab]);
+}, [activeTab]);
 
   const handleProcessFiles = async () => {
     try {
@@ -190,7 +242,7 @@ function App() {
         setLoading(false);
         console.log('=== FIM DO PROCESSAMENTO ===');
     }
-  };
+};
 
   const handleResetProcess = () => {
     setFiles([]);
@@ -229,7 +281,7 @@ function App() {
     }
   };
 
-  const handleSelectAll = () => {
+const handleSelectAll = () => {
     if (selectedFiles.length === files.length) {
         // Se todos estão selecionados, desseleciona todos
         setSelectedFiles([]);
@@ -238,7 +290,7 @@ function App() {
         const allFileNames = files.map(file => file.nome);
         setSelectedFiles(allFileNames);
     }
-  };
+};
 
   // Funções de validação
   const handleValidationMunCodeR189 = async () => {
@@ -623,23 +675,137 @@ function App() {
     );
   };
 
+  // NOVO: Componente para a tela inicial
+  const WelcomeScreen = () => {
+    return (
+      <div className="welcome-screen">
+        <div className="welcome-content">
+          <div className="welcome-logo">
+            <img src={wegLogo} alt="WEG Logo" />
+          </div>
+          <h1>Automação de Processos Financeiros</h1>
+          <p>Selecione uma empresa no menu lateral para acessar suas funcionalidades.</p>
+          
+          <div className="company-cards">
+            {companies.map(company => (
+              <div 
+                key={company.id}
+                className="company-card"
+                onClick={() => handleCompanySelect(company.id)}
+              >
+                <div className="company-card-header">
+                  <h3>{company.name}</h3>
+                </div>
+                <div className="company-card-body">
+                  <p>{company.id === 'orange' ? 'Automação de Contratos Financeiros' : 'Em desenvolvimento'}</p>
+                  <button 
+                    className="company-access-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCompanySelect(company.id);
+                    }}
+                  >
+                    Acessar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // NOVO: Componente para o modal de confirmação
+  const ConfirmationModal = () => {
+    if (!showConfirmModal) return null;
+    
+    return (
+      <div className="modal-overlay">
+        <div className="modal-content">
+          <h3>Confirmar Ação</h3>
+          <p>Deseja voltar para o dashboard? Os dados não salvos serão perdidos.</p>
+          <div className="modal-actions">
+            <button className="modal-button cancel" onClick={cancelBackToDashboard}>
+              Cancelar
+            </button>
+            <button className="modal-button confirm" onClick={confirmBackToDashboard}>
+              Confirmar
+            </button>
+          </div>
+        </div>
+        </div>
+    );
+};
+
   return (
     <div className="App">
+      {/* Menu lateral com cores WEG */}
+      <div className="sidebar">
+        <div className="sidebar-header" onClick={() => handleCompanySelect(null)}>
+          <img 
+            src={wegLogo} 
+            alt="WEG Logo" 
+            className="weg-logo"
+          />
+          <p>Automação de Processos</p>
+        </div>
+        
+        <div className="sidebar-menu">
+          <div className="menu-category">
+            <h3>Empresas</h3>
+            
+            <div className="company-list">
+              {companies.map(company => (
+                <div 
+                  key={company.id}
+                  className={`company-item ${selectedCompany === company.id ? 'active' : ''}`}
+                  onClick={() => handleCompanySelect(company.id)}
+                >
+                  <span className="company-indicator"></span>
+                  <span className="company-name">{company.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* Conteúdo principal - mostra tela de boas-vindas ou aplicação Orange */}
+      <div className="main-content">
+        {selectedCompany === 'orange' ? (
+          // Aplicação Orange
+          <>
+            {/* Cabeçalho */}
       <div className="app-header">
-        <h1>Automação de Contratos - Finanças</h1>
+              {/* Breadcrumbs para navegação */}
+              <div className="breadcrumbs">
+                <span className="breadcrumb-item" onClick={() => handleCompanySelect(null)}>WEG</span>
+                <span className="breadcrumb-separator">/</span>
+                <span className="breadcrumb-item">Orange</span>
+                <span className="breadcrumb-separator">/</span>
+                <span className="breadcrumb-item active">Automação de Contratos</span>
+              </div>
+              
+              <div className="header-actions">
+                <button className="back-button" onClick={handleBackButtonClick}>
+                  ← Voltar para Dashboard
+                </button>
         <button className="reset-button" onClick={handleResetProcess}>
           Resetar Processo
         </button>
+              </div>
       </div>
 
+            {/* Conteúdo das abas */}
       <div className="tab-container">
         <div className="tabs">
           {['R189', 'QPE', 'SPB', 'NFSERV', 'MUN_CODE'].map(tab => (
             <button
               key={tab}
-              className={`tab-button ${activeTab === tab ? 'active' : ''} ${!enabledTabs[tab] ? 'disabled' : ''}`}
+                    className={`tab-button ${activeTab === tab ? 'active' : ''} ${!enabledTabs[tab] ? 'disabled' : ''}`}
               onClick={() => handleTabChange(tab)}
-              disabled={!enabledTabs[tab]}
+                    disabled={!enabledTabs[tab]}
             >
               {tab}
             </button>
@@ -651,22 +817,22 @@ function App() {
             <div className="section-header">Arquivos</div>
             <div className="section-content">
               <div className="button-container">
-                <button className="action-button" onClick={handleSearchFiles} disabled={loading}>
+                      <button className="action-button" onClick={handleSearchFiles} disabled={loading}>
                   Buscar Arquivos
                 </button>
-                <button 
-                  className="action-button" 
-                  onClick={handleProcessFiles} 
-                  disabled={loading || selectedFiles.length === 0}
-                >
+                      <button 
+                        className="action-button" 
+                        onClick={handleProcessFiles} 
+                        disabled={loading || selectedFiles.length === 0}
+                      >
                   Processar Arquivos
                 </button>
               </div>
               
-              {loading && <p>Carregando...</p>}
+                    {loading && <div className="loading-indicator">Carregando...</div>}
               
               <div className="files-section">
-                {!loading && <FileList key={fileListKey} />}
+                      {!loading && <FileList key={fileListKey} />}
               </div>
             </div>
           </div>
@@ -674,40 +840,38 @@ function App() {
           <div className="section-container">
             <div className="section-header">Validações</div>
             <div className="section-content">
-              {validationEnabled ? (
-                <>
-                  <button className="validation-button" onClick={handleValidationMunCodeR189}>
-                    1. Verificar Divergências MUN_CODE vs R189
+                    {validationEnabled ? (
+                      <>
+                        <button className="validation-button" onClick={handleValidationMunCodeR189}>
+                          1. Verificar Divergências MUN_CODE vs R189
+                        </button>
+                        <button className="validation-button" onClick={handleValidationR189}>
+                          2. Verificar Divergências R189
+                        </button>
+                        <button className="validation-button" onClick={handleValidationQpeR189}>
+                          3. Verificar Divergências QPE vs R189
+                        </button>
+                        <button className="validation-button" onClick={handleValidationSpbR189}>
+                          4. Verificar Divergências SPB vs R189
                   </button>
-                  <button className="validation-button" onClick={handleValidationR189}>
-                    2. Verificar Divergências R189
+                        <button className="validation-button" onClick={handleValidationNfservR189}>
+                          5. Verificar Divergências NFSERV vs R189
                   </button>
-                  <button className="validation-button" onClick={handleValidationQpeR189}>
-                    3. Verificar Divergências QPE vs R189
-                  </button>
-                  <button className="validation-button" onClick={handleValidationSpbR189}>
-                    4. Verificar Divergências SPB vs R189
-                  </button>
-                  <button className="validation-button" onClick={handleValidationNfservR189}>
-                    5. Verificar Divergências NFSERV vs R189
-                  </button>
-                  
-                  {/* Adicione uma divisão visual antes do botão de consolidação */}
-                  <div className="validation-divider">
-                    <span>Relatórios</span>
-                  </div>
-                  
-                  {/* Novo botão de consolidação de relatórios */}
-                  <button 
-                    className="consolidate-button" 
-                    onClick={handleConsolidateReports}
-                    disabled={loading}
-                  >
-                    Consolidar Todos os Relatórios em um Único Arquivo
+                        
+                        <div className="validation-divider">
+                          <span>Relatórios</span>
+                        </div>
+                        
+                        <button 
+                          className="consolidate-button" 
+                          onClick={handleConsolidateReports}
+                          disabled={loading}
+                        >
+                          Consolidar Todos os Relatórios em um Único Arquivo
                   </button>
                 </>
-              ) : (
-                <p>Complete o processamento de todos os arquivos para habilitar as validações.</p>
+                    ) : (
+                      <p>Complete o processamento de todos os arquivos para habilitar as validações.</p>
               )}
             </div>
           </div>
@@ -720,6 +884,15 @@ function App() {
             Status {key}: {value}
           </div>
         ))}
+            </div>
+          </>
+        ) : (
+          // Tela de boas-vindas
+          <WelcomeScreen />
+        )}
+        
+        {/* Modal de confirmação */}
+        <ConfirmationModal />
       </div>
     </div>
   );
