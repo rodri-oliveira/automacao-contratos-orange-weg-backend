@@ -117,7 +117,7 @@ class SharePointAuth:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    def baixar_arquivo_sharepoint(self, nome_arquivo: str, pasta_r189: str) -> Optional[BytesIO]:
+    def baixar_arquivo_sharepoint(self, nome_arquivo: str, pasta_r189: str) -> Optional[bytes]:
         """
         Baixa um arquivo específico do SharePoint.
         
@@ -126,7 +126,7 @@ class SharePointAuth:
             pasta_r189: Caminho da pasta no SharePoint
             
         Returns:
-            BytesIO contendo o arquivo ou None se houver erro
+            bytes contendo o arquivo ou None se houver erro
         """
         token = self.acquire_token()
         if not token:
@@ -140,9 +140,11 @@ class SharePointAuth:
         }
 
         try:
+            logger.info(f"Baixando arquivo: {url}")
             response = requests.get(url, headers=headers)
             if response.status_code == 200:
-                return BytesIO(response.content)
+                logger.info(f"Arquivo baixado com sucesso: {nome_arquivo}")
+                return response.content
             else:
                 logger.error(f"Erro ao baixar arquivo: {response.status_code}")
                 return None
@@ -264,3 +266,61 @@ class SharePointAuth:
         except Exception as e:
             logger.error(f"Erro na requisição SharePoint: {str(e)}")
             raise
+
+    async def enviar_arquivo_sharepoint(self, conteudo: bytes, nome_arquivo: str, pasta: str) -> bool:
+        """
+        Envia um arquivo para o SharePoint com sobrescrita explícita.
+        
+        Args:
+            conteudo: Bytes contendo o arquivo a ser enviado
+            nome_arquivo: Nome do arquivo no destino
+            pasta: Caminho relativo da pasta no SharePoint
+            
+        Returns:
+            bool indicando sucesso ou falha
+        """
+        try:
+            logger.info(f"=== INICIANDO UPLOAD PARA SHAREPOINT ===")
+            logger.info(f"Nome do arquivo: {nome_arquivo}")
+            logger.info(f"Pasta destino: {pasta}")
+            logger.info(f"Tamanho do conteúdo: {len(conteudo)} bytes")
+            
+            token = self.acquire_token()
+            if not token:
+                logger.error("Falha ao obter token para upload")
+                raise Exception("Falha ao obter token para upload")
+
+            # Monta a URL para upload com parâmetro de sobrescrita explícito
+            url = f"{self.site_url}/_api/web/GetFolderByServerRelativeUrl('{pasta}')/Files/add(url='{nome_arquivo}',overwrite=true)"
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json;odata=verbose",
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(len(conteudo))
+            }
+
+            logger.info(f"URL de upload: {url}")
+            logger.info(f"Headers: {headers}")
+            
+            async with aiohttp.ClientSession() as session:
+                logger.info("Iniciando requisição POST")
+                async with session.post(url, headers=headers, data=conteudo) as response:
+                    status = response.status
+                    logger.info(f"Status da resposta: {status}")
+                    
+                    texto = await response.text()
+                    logger.info(f"Resposta: {texto[:500]}..." if len(texto) > 500 else texto)
+                    
+                    if status in [200, 201]:
+                        logger.info(f"Upload do arquivo {nome_arquivo} concluído com sucesso")
+                        return True
+                    else:
+                        logger.error(f"Erro ao enviar arquivo {nome_arquivo}. Status: {status}")
+                        logger.error(f"Resposta completa: {texto}")
+                        return False
+
+        except Exception as e:
+            logger.error(f"Exceção ao enviar arquivo para SharePoint: {str(e)}")
+            logger.error(traceback.format_exc())
+            return False

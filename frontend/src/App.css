@@ -115,6 +115,23 @@
   min-height: 200px;
   max-height: 300px;
   overflow-y: auto;
+  margin: 20px;
+}
+
+.file-list table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.file-list th, 
+.file-list td {
+  padding: 8px;
+  text-align: left;
+  border-bottom: 1px solid #ddd;
+}
+
+.file-list tr:hover {
+  background-color: #f5f5f5;
 }
 
 .validation-button {
@@ -178,6 +195,24 @@
 
 .select-all-button:hover {
   background-color: #0068b8;
+  padding: 5px 10px;
+  background-color: #4CAF50;
+}
+
+.selection-controls {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.select-all-button:hover {
+  background-color: #45a049;
+}
+
+.selected-count {
+  color: #666;
+  font-size: 0.9em;
 }
 
 .file-list {
@@ -207,4 +242,136 @@
 
 .file-item.selected {
   background-color: #e3f2fd;
+}
+
+.selection-header {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  background-color: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+}
+
+.select-all-checkbox {
+  margin-right: 10px;
+}
+
+.select-all-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.file-list table thead th {
+  background-color: #f5f5f5;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.checkbox-column {
+  width: 40px;
+  text-align: center;
+}
+
+.selected-row {
+  background-color: #e3f2fd;
+}
+
+.tab-button.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.validation-button:hover {
+  background-color: #e9ecef;
+}
+
+.tab-button.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.validation-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 15px;
+  margin-bottom: 5px;
+  background-color: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.validation-button:hover {
+  background-color: #e9ecef;
+}
+
+.empty-files-message {
+  text-align: center;
+  padding: 30px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  border: 1px dashed #ccc;
+  margin: 20px 0;
+  color: #6c757d;
+}
+
+.empty-files-message p {
+  margin-bottom: 10px;
+}
+
+.empty-files-message strong {
+  color: #005baa;
+}
+
+/* Estilo para o divisor na seção de validações */
+.validation-divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0 15px;
+  color: #005baa;
+  font-weight: bold;
+}
+
+.validation-divider::before,
+.validation-divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid #ddd;
+}
+
+.validation-divider::before {
+  margin-right: 10px;
+}
+
+.validation-divider::after {
+  margin-left: 10px;
+}
+
+/* Estilo para o botão de consolidação */
+.consolidate-button {
+  display: block;
+  width: 100%;
+  text-align: center;
+  padding: 12px 15px;
+  margin-bottom: 5px;
+  background-color: #005baa;
+  color: white;
+  border: 1px solid #004a8c;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.consolidate-button:hover {
+  background-color: #004a8c;
+}
+
+.consolidate-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

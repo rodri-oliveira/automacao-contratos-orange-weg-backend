@@ -1,20 +1,23 @@
-from fastapi import APIRouter, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, HTTPException, status, UploadFile, File, Body, Request
 from typing import List, Dict, Any
 from io import BytesIO
 import logging
 from pydantic import BaseModel
+import traceback
+import json
 
 from app.core.sharepoint import SharePointClient
 from app.core.extractors.r189_extractor import R189Extractor
 from app.core.config import settings
 from app.core.auth import SharePointAuth
+from app.core.extractors.qpe_extractor import QPEExtractor
 
-router = APIRouter(prefix="/r189", tags=["R189"])
+router = APIRouter(prefix="/qpe", tags=["QPE"])
 logger = logging.getLogger(__name__)
 
 # Instâncias compartilhadas
 sharepoint_client = SharePointClient()
-r189_extractor = R189Extractor()
+qpe_extractor = QPEExtractor()
 
 class ProcessFilesRequest(BaseModel):
     files: List[str]
@@ -58,84 +61,29 @@ async def list_r189_files():
         )
 
 @router.post("/process")
-async def process_files(request: ProcessFilesRequest):
-    """Processa arquivos R189 selecionados"""
+async def process_qpe_files(files: List[str]):
+    """Processa os arquivos QPE selecionados."""
+    logger.info("=== INICIANDO PROCESSAMENTO DE ARQUIVOS QPE ===")
+    logger.info(f"Arquivos recebidos: {files}")
+    
     try:
-        if not request.files:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Nenhum arquivo selecionado"
-            )
-
-        results = []
-        for file_name in request.files:
-            try:
-                # Download do arquivo
-                content = await sharepoint_client.download_file(
-                    settings.R189_FOLDER, 
-                    file_name
-                )
-                
-                if not content:
-                    results.append({
-                        "file": file_name,
-                        "status": "error",
-                        "message": "Erro ao baixar arquivo"
-                    })
-                    continue
-
-                # Processa o arquivo
-                result = await r189_extractor.process_file(content)
-                
-                if not result["success"]:
-                    results.append({
-                        "file": file_name,
-                        "status": "error",
-                        "message": result["error"]
-                    })
-                    continue
-
-                # Upload do arquivo consolidado
-                if "consolidated_file" in result:
-                    consolidated_name = f"Consolidado_{file_name.replace('.xlsb', '.xlsx')}"
-                    success = await sharepoint_client.upload_file(
-                        result["consolidated_file"],
-                        consolidated_name,
-                        settings.CONSOLIDATED_FOLDER
-                    )
-
-                    results.append({
-                        "file": file_name,
-                        "status": "success" if success else "error",
-                        "message": ("Arquivo processado e consolidado com sucesso" 
-                                  if success else "Erro ao enviar arquivo consolidado")
-                    })
-                else:
-                    results.append({
-                        "file": file_name,
-                        "status": "error",
-                        "message": "Arquivo processado mas sem conteúdo consolidado"
-                    })
-
-            except Exception as e:
-                logger.error(f"Erro processando arquivo {file_name}: {str(e)}")
-                results.append({
-                    "file": file_name,
-                    "status": "error",
-                    "message": str(e)
-                })
-
-        return {
-            "success": any(r["status"] == "success" for r in results),
-            "results": results
-        }
-
+        if not files:
+            logger.error("Nenhum arquivo selecionado")
+            return {"success": False, "error": "Nenhum arquivo selecionado"}
+            
+        logger.info("Criando instância do QPEExtractor")
+        qpe_extractor = QPEExtractor()
+        
+        logger.info("Chamando process_selected_files")
+        result = await qpe_extractor.process_selected_files(files)
+        logger.info(f"Resultado do processamento: {result}")
+        
+        return result
+            
     except Exception as e:
-        logger.error(f"Erro no processamento: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        logger.error(f"Erro ao processar arquivos QPE: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
 
 @router.get("/verify/{file_name}")
 async def verify_file(file_name: str):
@@ -252,3 +200,12 @@ async def buscar_arquivos(tipo: str):
     except Exception as e:
         logger.error(f"Erro ao buscar arquivos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/test")
+async def test_qpe_route(files: List[str]):
+    """Rota de teste para verificar a recepção de dados."""
+    return {
+        "success": True,
+        "received_files": files,
+        "count": len(files)
+    }

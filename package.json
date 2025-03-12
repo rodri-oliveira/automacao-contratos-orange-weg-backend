@@ -1,0 +1,10 @@
+{
+    "name": "automacao-financas-backend",
+    "version": "1.0.0",
+    "scripts": {
+        "dev": "nodemon"
+    },
+    "dependencies": {
+        "nodemon": "^3.0.2"
+    }
+}
