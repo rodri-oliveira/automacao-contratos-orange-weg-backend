@@ -683,8 +683,7 @@ const handleSelectAll = () => {
           <div className="welcome-logo">
             <img src={wegLogo} alt="WEG Logo" />
           </div>
-          <h1>Automação de Processos Financeiros</h1>
-          <p>Selecione uma empresa no menu lateral para acessar suas funcionalidades.</p>
+          <h1>Automação de Processos-Contratos</h1>
           
           <div className="company-cards">
             {companies.map(company => (
@@ -743,12 +742,14 @@ const handleSelectAll = () => {
       {/* Menu lateral com cores WEG */}
       <div className="sidebar">
         <div className="sidebar-header" onClick={() => handleCompanySelect(null)}>
-          <img 
-            src={wegLogo} 
-            alt="WEG Logo" 
-            className="weg-logo"
-          />
-          <p>Automação de Processos</p>
+          <div className="sidebar-logo-container">
+            <img 
+              src={wegLogo} 
+              alt="WEG Logo" 
+              className="weg-logo"
+            />
+          </div>
+          <p>Automação de Processos-Contratos</p>
         </div>
         
         <div className="sidebar-menu">
@@ -777,7 +778,7 @@ const handleSelectAll = () => {
           // Aplicação Orange
           <>
             {/* Cabeçalho */}
-      <div className="app-header">
+            <div className="app-header">
               {/* Breadcrumbs para navegação */}
               <div className="breadcrumbs">
                 <span className="breadcrumb-item" onClick={() => handleCompanySelect(null)}>WEG</span>
@@ -791,55 +792,55 @@ const handleSelectAll = () => {
                 <button className="back-button" onClick={handleBackButtonClick}>
                   ← Voltar para Dashboard
                 </button>
-        <button className="reset-button" onClick={handleResetProcess}>
-          Resetar Processo
-        </button>
+                <button className="reset-button" onClick={handleResetProcess}>
+                  Resetar Processo
+                </button>
               </div>
-      </div>
+            </div>
 
             {/* Conteúdo das abas */}
-      <div className="tab-container">
-        <div className="tabs">
-          {['R189', 'QPE', 'SPB', 'NFSERV', 'MUN_CODE'].map(tab => (
-            <button
-              key={tab}
+            <div className="tab-container">
+              <div className="tabs">
+                {['R189', 'QPE', 'SPB', 'NFSERV', 'MUN_CODE'].map(tab => (
+                  <button
+                    key={tab}
                     className={`tab-button ${activeTab === tab ? 'active' : ''} ${!enabledTabs[tab] ? 'disabled' : ''}`}
-              onClick={() => handleTabChange(tab)}
+                    onClick={() => handleTabChange(tab)}
                     disabled={!enabledTabs[tab]}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
 
-        <div className="tab-content">
-          <div className="section-container">
-            <div className="section-header">Arquivos</div>
-            <div className="section-content">
-              <div className="button-container">
+              <div className="tab-content">
+                <div className="section-container">
+                  <div className="section-header">Arquivos</div>
+                  <div className="section-content">
+                    <div className="button-container">
                       <button className="action-button" onClick={handleSearchFiles} disabled={loading}>
-                  Buscar Arquivos
-                </button>
+                        Buscar Arquivos
+                      </button>
                       <button 
                         className="action-button" 
                         onClick={handleProcessFiles} 
                         disabled={loading || selectedFiles.length === 0}
                       >
-                  Processar Arquivos
-                </button>
-              </div>
-              
+                        Processar Arquivos
+                      </button>
+                    </div>
+                    
                     {loading && <div className="loading-indicator">Carregando...</div>}
-              
-              <div className="files-section">
+                    
+                    <div className="files-section">
                       {!loading && <FileList key={fileListKey} />}
-              </div>
-            </div>
-          </div>
+                    </div>
+                  </div>
+                </div>
 
-          <div className="section-container">
-            <div className="section-header">Validações</div>
-            <div className="section-content">
+                <div className="section-container">
+                  <div className="section-header">Validações</div>
+                  <div className="section-content">
                     {validationEnabled ? (
                       <>
                         <button className="validation-button" onClick={handleValidationMunCodeR189}>
@@ -853,10 +854,10 @@ const handleSelectAll = () => {
                         </button>
                         <button className="validation-button" onClick={handleValidationSpbR189}>
                           4. Verificar Divergências SPB vs R189
-                  </button>
+                        </button>
                         <button className="validation-button" onClick={handleValidationNfservR189}>
                           5. Verificar Divergências NFSERV vs R189
-                  </button>
+                        </button>
                         
                         <div className="validation-divider">
                           <span>Relatórios</span>
@@ -868,22 +869,22 @@ const handleSelectAll = () => {
                           disabled={loading}
                         >
                           Consolidar Todos os Relatórios em um Único Arquivo
-                  </button>
-                </>
+                        </button>
+                      </>
                     ) : (
                       <p>Complete o processamento de todos os arquivos para habilitar as validações.</p>
-              )}
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      <div className="status-bar">
-        {Object.entries(status).map(([key, value]) => (
-          <div key={key} className="status-item">
-            Status {key}: {value}
-          </div>
-        ))}
+            <div className="status-bar">
+              {Object.entries(status).map(([key, value]) => (
+                <div key={key} className="status-item">
+                  Status {key}: {value}
+                </div>
+              ))}
             </div>
           </>
         ) : (
