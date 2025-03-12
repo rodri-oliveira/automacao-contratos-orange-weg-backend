@@ -326,3 +326,52 @@
 .empty-files-message strong {
   color: #005baa;
 }
+
+/* Estilo para o divisor na seção de validações */
+.validation-divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0 15px;
+  color: #005baa;
+  font-weight: bold;
+}
+
+.validation-divider::before,
+.validation-divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid #ddd;
+}
+
+.validation-divider::before {
+  margin-right: 10px;
+}
+
+.validation-divider::after {
+  margin-left: 10px;
+}
+
+/* Estilo para o botão de consolidação */
+.consolidate-button {
+  display: block;
+  width: 100%;
+  text-align: center;
+  padding: 12px 15px;
+  margin-bottom: 5px;
+  background-color: #005baa;
+  color: white;
+  border: 1px solid #004a8c;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.consolidate-button:hover {
+  background-color: #004a8c;
+}
+
+.consolidate-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

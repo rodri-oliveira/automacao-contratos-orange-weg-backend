@@ -505,6 +505,63 @@ function App() {
     }
   };
 
+  // Adicione esta nova função de manipulação para consolidar relatórios
+  const handleConsolidateReports = async () => {
+    try {
+      console.log("Iniciando consolidação de relatórios");
+      setLoading(true);
+      setError(null);
+      
+      // Atualizar o status para indicar que está em processamento
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        R189: 'Consolidando relatórios...'
+      }));
+      
+      const response = await fetch('http://localhost:8000/api/validations/consolidate_reports', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log('Status da resposta:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`Erro na consolidação, ${response.status} (${response.statusText})`);
+      }
+      
+      const data = await response.json();
+      console.log('Dados da resposta:', data);
+      
+      if (data.success) {
+        // Atualizar o status para indicar sucesso
+        setStatus(prevStatus => ({
+          ...prevStatus,
+          R189: 'Consolidação concluída com sucesso'
+        }));
+        
+        // Exibir mensagem de sucesso
+        alert(data.message || 'Relatórios consolidados com sucesso!');
+      } else {
+        throw new Error(data.error || 'Erro na consolidação');
+      }
+    } catch (error) {
+      console.error('Erro completo:', error);
+      
+      // Atualizar o status para indicar erro
+      setStatus(prevStatus => ({
+        ...prevStatus,
+        R189: 'Erro na consolidação'
+      }));
+      
+      setError(`Erro na consolidação de relatórios: ${error.message}`);
+      alert(`Erro na consolidação: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const FileList = () => {
     if (error) return <div style={{color: 'red'}}>{error}</div>;
     if (files.length === 0 && !error && !loading) {
@@ -633,6 +690,20 @@ function App() {
                   </button>
                   <button className="validation-button" onClick={handleValidationNfservR189}>
                     5. Verificar Divergências NFSERV vs R189
+                  </button>
+                  
+                  {/* Adicione uma divisão visual antes do botão de consolidação */}
+                  <div className="validation-divider">
+                    <span>Relatórios</span>
+                  </div>
+                  
+                  {/* Novo botão de consolidação de relatórios */}
+                  <button 
+                    className="consolidate-button" 
+                    onClick={handleConsolidateReports}
+                    disabled={loading}
+                  >
+                    Consolidar Todos os Relatórios em um Único Arquivo
                   </button>
                 </>
               ) : (

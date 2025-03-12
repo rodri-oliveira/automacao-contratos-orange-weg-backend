@@ -8,6 +8,7 @@ from app.core.reports.divergence_report_qpe_r189 import DivergenceReportQPER189
 from app.core.reports.divergence_report_spb_r189 import DivergenceReportSPBR189
 from app.core.reports.divergence_report_nfserv_r189 import DivergenceReportNFSERVR189
 from app.core.reports.divergence_report_r189 import DivergenceReportR189
+from app.core.reports.consolidated_report import ConsolidatedReport
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -112,5 +113,26 @@ async def validate_nfserv_r189():
         return {
             "success": False,
             "error": f"Erro na validação: {str(e)}",
+            "show_popup": True
+        }
+
+@router.post("/consolidate_reports")
+async def consolidate_reports():
+    """
+    Consolida os relatórios mais recentes em um único arquivo Excel.
+    """
+    logger.info("Iniciando consolidação de relatórios")
+    
+    try:
+        consolidated_report = ConsolidatedReport()
+        result = await consolidated_report.consolidate_reports()
+        
+        logger.info(f"Consolidação de relatórios concluída: {result}")
+        return result
+    except Exception as e:
+        logger.exception(f"Erro ao consolidar relatórios: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Erro ao consolidar relatórios: {str(e)}",
             "show_popup": True
         }
