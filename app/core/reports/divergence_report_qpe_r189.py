@@ -17,6 +17,8 @@ class DivergenceReportQPER189:
     def __init__(self):
         self.sharepoint_auth = SharePointAuth()
         self.sharepoint_client = SharePointClient()
+        # Lista de possíveis nomes para a coluna de total
+        self.colunas_total = ['Total Geral', 'Grand Total', 'Total Gera', 'Total', 'Valor Total']
 
     async def check_divergences(self, qpe_data: pd.DataFrame, r189_data: pd.DataFrame) -> tuple[bool, str, pd.DataFrame]:
         """
@@ -43,13 +45,26 @@ class DivergenceReportQPER189:
             
             logger.info(f"QPE: {len(qpe_data)} linhas, R189: {len(r189_data)} linhas")
             
+            # Verifica qual coluna de total está presente no DataFrame do R189
+            coluna_total_encontrada = None
+            for col in self.colunas_total:
+                if col in r189_data.columns:
+                    coluna_total_encontrada = col
+                    logger.info(f"Coluna de total encontrada no R189: {col}")
+                    break
+                    
+            if not coluna_total_encontrada:
+                logger.error(f"Nenhuma das colunas de total foi encontrada no R189: {self.colunas_total}")
+                return False, f"Erro: Nenhuma das colunas de total foi encontrada no R189. Esperado uma das seguintes: {self.colunas_total}", pd.DataFrame()
+            
             divergences = []
             
             # Contagem de QPE_ID
+            logger.info("Contando QPE_IDs únicos")
             qpe_ids = set(qpe_data['QPE_ID'].str.lower().unique())
             r189_qpe_ids = set(r189_data[r189_data['Invoice number'].str.lower().str.startswith('qpe-', na=False)]['Invoice number'].str.lower().unique())
             
-            logger.info(f"QPE IDs: {len(qpe_ids)}, R189 QPE IDs: {len(r189_qpe_ids)}")
+            logger.info(f"QPE IDs únicos: {len(qpe_ids)}, R189 QPE IDs únicos: {len(r189_qpe_ids)}")
             
             # Adiciona informação de quantidade ao início do relatório
             divergences.append({
@@ -63,41 +78,45 @@ class DivergenceReportQPER189:
             
             # Se houver divergência na quantidade, identifica quais estão faltando
             if len(qpe_ids) != len(r189_qpe_ids):
-                logger.info("Divergência na quantidade de QPE IDs")
+                logger.warning(f"Divergência na contagem de QPE IDs: QPE={len(qpe_ids)}, R189={len(r189_qpe_ids)}")
                 
                 # IDs que estão no QPE mas não no R189
                 missing_in_r189 = qpe_ids - r189_qpe_ids
                 logger.info(f"IDs no QPE mas não no R189: {len(missing_in_r189)}")
                 
                 for qpe_id in missing_in_r189:
-                    qpe_row = qpe_data[qpe_data['QPE_ID'].str.lower() == qpe_id].iloc[0]
-                    divergences.append({
-                        'Tipo': 'QPE_ID não encontrado no R189',
-                        'QPE_ID': qpe_row['QPE_ID'],  # Mantém o caso original
-                        'CNPJ QPE': qpe_row['CNPJ'],
-                        'CNPJ R189': 'N/A',
-                        'Valor QPE': qpe_row['VALOR_TOTAL'],
-                        'Valor R189': 'N/A'
-                    })
+                    qpe_rows = qpe_data[qpe_data['QPE_ID'].str.lower() == qpe_id]
+                    if not qpe_rows.empty:
+                        qpe_row = qpe_rows.iloc[0]
+                        divergences.append({
+                            'Tipo': 'QPE_ID não encontrado no R189',
+                            'QPE_ID': qpe_row['QPE_ID'],  # Mantém o caso original
+                            'CNPJ QPE': qpe_row['CNPJ'],
+                            'CNPJ R189': 'N/A',
+                            'Valor QPE': qpe_row['VALOR_TOTAL'],
+                            'Valor R189': 'N/A'
+                        })
                 
                 # IDs que estão no R189 mas não no QPE
                 missing_in_qpe = r189_qpe_ids - qpe_ids
                 logger.info(f"IDs no R189 mas não no QPE: {len(missing_in_qpe)}")
                 
                 for r189_id in missing_in_qpe:
-                    r189_row = r189_data[r189_data['Invoice number'].str.lower() == r189_id].iloc[0]
-                    divergences.append({
-                        'Tipo': 'QPE_ID não encontrado no QPE',
-                        'QPE_ID': r189_row['Invoice number'],  # Mantém o caso original
-                        'CNPJ QPE': 'N/A',
-                        'CNPJ R189': r189_row['CNPJ - WEG'],
-                        'Valor QPE': 'N/A',
-                        'Valor R189': r189_row['Total Geral']
-                    })
+                    r189_rows = r189_data[r189_data['Invoice number'].str.lower() == r189_id]
+                    if not r189_rows.empty:
+                        r189_row = r189_rows.iloc[0]
+                        divergences.append({
+                            'Tipo': 'QPE_ID não encontrado no QPE',
+                            'QPE_ID': r189_row['Invoice number'],  # Mantém o caso original
+                            'CNPJ QPE': 'N/A',
+                            'CNPJ R189': r189_row['CNPJ - WEG'],
+                            'Valor QPE': 'N/A',
+                            'Valor R189': r189_row[coluna_total_encontrada]
+                        })
             
             # Verifica se as colunas necessárias existem
             qpe_required = ['QPE_ID', 'CNPJ', 'VALOR_TOTAL']
-            r189_required = ['Invoice number', 'CNPJ - WEG', 'Total Geral']
+            r189_required = ['Invoice number', 'CNPJ - WEG', coluna_total_encontrada]
             
             missing_qpe = [col for col in qpe_required if col not in qpe_data.columns]
             if missing_qpe:
@@ -113,7 +132,7 @@ class DivergenceReportQPER189:
             try:
                 logger.info("Convertendo colunas de valor para numérico")
                 qpe_data['VALOR_TOTAL'] = pd.to_numeric(qpe_data['VALOR_TOTAL'], errors='coerce')
-                r189_data['Total Geral'] = pd.to_numeric(r189_data['Total Geral'], errors='coerce')
+                r189_data[coluna_total_encontrada] = pd.to_numeric(r189_data[coluna_total_encontrada], errors='coerce')
             except Exception as e:
                 logger.error(f"Erro ao converter valores: {str(e)}")
                 return False, f"Erro: Valores inválidos nas colunas de valor: {str(e)}", pd.DataFrame()
@@ -123,10 +142,10 @@ class DivergenceReportQPER189:
             null_qpe_cnpj = qpe_data['CNPJ'].isnull().sum()
             null_qpe_valor = qpe_data['VALOR_TOTAL'].isnull().sum()
             
-            logger.info(f"Valores nulos - QPE_ID: {null_qpe_id}, CNPJ: {null_qpe_cnpj}, VALOR_TOTAL: {null_qpe_valor}")
+            logger.info(f"Valores nulos: QPE_ID={null_qpe_id}, CNPJ={null_qpe_cnpj}, VALOR_TOTAL={null_qpe_valor}")
             
             if any([null_qpe_id, null_qpe_cnpj, null_qpe_valor]):
-                logger.error("Encontrados valores nulos no QPE")
+                logger.warning("Encontrados valores nulos no QPE")
                 return False, (
                     "Erro: Encontrados valores nulos no QPE:\n"
                     f"QPE_ID: {null_qpe_id} valores nulos\n"
@@ -135,7 +154,7 @@ class DivergenceReportQPER189:
                 ), pd.DataFrame()
             
             # Itera sobre cada linha do QPE
-            logger.info("Verificando divergências linha a linha")
+            logger.info("Verificando cada linha do QPE")
             for idx, qpe_row in qpe_data.iterrows():
                 qpe_id = str(qpe_row['QPE_ID']).strip()
                 qpe_cnpj = str(qpe_row['CNPJ']).strip()
@@ -143,7 +162,7 @@ class DivergenceReportQPER189:
                 
                 # Validação do QPE_ID
                 if not qpe_id:
-                    logger.warning(f"QPE_ID vazio encontrado para CNPJ: {qpe_cnpj}")
+                    logger.warning(f"QPE_ID vazio encontrado na linha {idx}")
                     divergences.append({
                         'Tipo': 'QPE_ID vazio',
                         'QPE_ID': 'VAZIO',
@@ -156,7 +175,7 @@ class DivergenceReportQPER189:
                 
                 # Validação do CNPJ
                 if not qpe_cnpj or len(qpe_cnpj) != 18:  # Formato XX.XXX.XXX/XXXX-XX
-                    logger.warning(f"CNPJ inválido encontrado: {qpe_cnpj} para QPE_ID: {qpe_id}")
+                    logger.warning(f"CNPJ inválido para QPE_ID {qpe_id}: {qpe_cnpj}")
                     divergences.append({
                         'Tipo': 'CNPJ inválido',
                         'QPE_ID': qpe_id,
@@ -173,7 +192,7 @@ class DivergenceReportQPER189:
                 if r189_match.empty:
                     # Não adiciona novamente se já foi registrado como ausente
                     if qpe_id.lower() not in missing_in_r189:
-                        logger.warning(f"QPE_ID não encontrado no R189: {qpe_id}")
+                        logger.warning(f"QPE_ID {qpe_id} não encontrado no R189")
                         divergences.append({
                             'Tipo': 'QPE_ID não encontrado no R189',
                             'QPE_ID': qpe_id,
@@ -185,29 +204,32 @@ class DivergenceReportQPER189:
                 else:
                     r189_row = r189_match.iloc[0]
                     r189_cnpj = str(r189_row['CNPJ - WEG']).strip()
-                    r189_valor = float(r189_row['Total Geral'])
+                    r189_valor = float(r189_row[coluna_total_encontrada])
                     
                     # Verifica CNPJ
                     if qpe_cnpj != r189_cnpj:
-                        logger.warning(f"CNPJ divergente para QPE_ID: {qpe_id}, QPE: {qpe_cnpj}, R189: {r189_cnpj}")
+                        logger.warning(f"CNPJ divergente para {qpe_id}: QPE={qpe_cnpj}, R189={r189_cnpj}")
                         divergences.append({
-                            'Tipo': 'CNPJ divergente',
+                            'Tipo': 'CNPJ',
                             'QPE_ID': qpe_id,
                             'CNPJ QPE': qpe_cnpj,
                             'CNPJ R189': r189_cnpj,
                             'Valor QPE': qpe_valor,
-                            'Valor R189': r189_valor
+                            'Valor R189': r189_valor,
+                            'Detalhes': f'CNPJ diferente para QPE {qpe_id}: QPE={qpe_cnpj}, R189={r189_cnpj}'
                         })
+                    
                     # Verifica Valor
-                    elif abs(qpe_valor - r189_valor) > 0.01:  # Tolerância de 1 centavo
-                        logger.warning(f"Valor divergente para QPE_ID: {qpe_id}, QPE: {qpe_valor}, R189: {r189_valor}")
+                    if abs(qpe_valor - r189_valor) > 0.01:  # Margem de tolerância de 1 centavo
+                        logger.warning(f"Valor divergente para {qpe_id}: QPE={qpe_valor}, R189={r189_valor}")
                         divergences.append({
-                            'Tipo': 'Valor divergente',
+                            'Tipo': 'VALOR',
                             'QPE_ID': qpe_id,
                             'CNPJ QPE': qpe_cnpj,
                             'CNPJ R189': r189_cnpj,
                             'Valor QPE': qpe_valor,
-                            'Valor R189': r189_valor
+                            'Valor R189': r189_row[coluna_total_encontrada],
+                            'Detalhes': f'Valor diferente para QPE {qpe_id}: QPE={qpe_valor}, R189={r189_valor}'
                         })
             
             if divergences:
@@ -279,8 +301,8 @@ class DivergenceReportQPER189:
                 logger.info("Arquivo Excel criado com sucesso")
                 
                 # Nome do arquivo com timestamp
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                report_name = f'report_divergencias_qpe_r189_{timestamp}.xlsx'
+                timestamp = now.strftime('%Y%m%d_%H%M%S')
+                report_name = f'{timestamp}_divergencias_qpe_r189.xlsx'
                 
                 return {
                     "success": True,
@@ -316,7 +338,7 @@ class DivergenceReportQPER189:
                 consolidado_path
             )
             
-            if not qpe_content:
+            if qpe_content is None:
                 logger.error("Não foi possível baixar o arquivo QPE_consolidado.xlsx")
                 return {
                     "success": False,
@@ -330,7 +352,7 @@ class DivergenceReportQPER189:
                 consolidado_path
             )
             
-            if not r189_content:
+            if r189_content is None:
                 logger.error("Não foi possível baixar o arquivo R189_consolidado.xlsx")
                 return {
                     "success": False,
@@ -344,8 +366,29 @@ class DivergenceReportQPER189:
                 qpe_io = BytesIO(qpe_content)
                 r189_io = BytesIO(r189_content)
                 
-                df_qpe = pd.read_excel(qpe_io, sheet_name='Consolidado_QPE')
-                df_r189 = pd.read_excel(r189_io, sheet_name='Consolidado_R189')
+                # Listar todas as planilhas disponíveis no arquivo R189
+                r189_excel = pd.ExcelFile(r189_io)
+                r189_sheets = r189_excel.sheet_names
+                logger.info(f"Planilhas disponíveis em R189_consolidado.xlsx: {r189_sheets}")
+                
+                # Usar a primeira planilha disponível no R189
+                if len(r189_sheets) > 0:
+                    r189_sheet_name = r189_sheets[0]
+                    logger.info(f"Usando planilha R189: {r189_sheet_name}")
+                    
+                    # Reabrir o BytesIO para o R189 pois ele foi consumido pelo ExcelFile
+                    r189_io = BytesIO(r189_content)
+                    
+                    # Ler os DataFrames
+                    df_qpe = pd.read_excel(qpe_io, sheet_name='QPE_Consolidado')
+                    df_r189 = pd.read_excel(r189_io, sheet_name=r189_sheet_name)
+                else:
+                    logger.error("Nenhuma planilha encontrada no arquivo R189_consolidado.xlsx")
+                    return {
+                        "success": False,
+                        "error": "Nenhuma planilha encontrada no arquivo R189_consolidado.xlsx",
+                        "show_popup": True
+                    }
                 
                 logger.info(f"Linhas em QPE: {len(df_qpe)}")
                 logger.info(f"Linhas em R189: {len(df_r189)}")
@@ -390,16 +433,33 @@ class DivergenceReportQPER189:
                 logger.info(f"Gerando relatório Excel com {len(divergences_df)} divergências")
                 report_result = await self.generate_excel_report(divergences_df)
                 
-                if not report_result["success"]:
-                    logger.error(f"Erro ao gerar relatório: {report_result.get('error')}")
+                if not report_result.get("success", False):
+                    error_msg = report_result.get("error", "Erro desconhecido ao gerar relatório")
+                    logger.error(f"Erro ao gerar relatório: {error_msg}")
                     return {
                         "success": False,
-                        "error": report_result.get("error"),
+                        "error": error_msg,
                         "show_popup": True
                     }
                 
                 # Nome do arquivo de relatório
-                report_filename = report_result["filename"]
+                report_filename = report_result.get("filename")
+                if not report_filename:
+                    logger.error("Nome do arquivo de relatório não encontrado no resultado")
+                    return {
+                        "success": False,
+                        "error": "Nome do arquivo de relatório não encontrado",
+                        "show_popup": True
+                    }
+                
+                file_content = report_result.get("file_content")
+                if not file_content:
+                    logger.error("Conteúdo do arquivo de relatório não encontrado no resultado")
+                    return {
+                        "success": False,
+                        "error": "Conteúdo do arquivo de relatório não encontrado",
+                        "show_popup": True
+                    }
                 
                 # Envia o relatório para o SharePoint
                 logger.info(f"Enviando relatório {report_filename} para o SharePoint")
@@ -407,7 +467,7 @@ class DivergenceReportQPER189:
                 
                 # Usar o método assíncrono do SharePointAuth
                 upload_success = await self.sharepoint_auth.enviar_arquivo_sharepoint(
-                    conteudo=report_result["file_content"].getvalue(),
+                    conteudo=file_content.getvalue(),
                     nome_arquivo=report_filename,
                     pasta=relatorios_path
                 )
