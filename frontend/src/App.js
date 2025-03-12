@@ -65,7 +65,7 @@ function App() {
     }
   };
 
-  // NOVO: Função para voltar ao dashboard
+  // NOVO: Função para mostrar o modal de confirmação
   const handleBackButtonClick = () => {
     setShowConfirmModal(true);
   };
