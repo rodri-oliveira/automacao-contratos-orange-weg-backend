@@ -5,7 +5,7 @@ from app.core.auth import SharePointAuth
 
 router = APIRouter()
 
-@router.get("/report/{filename}")
+@router.get("/backend/report/{filename}")
 async def download_report(filename: str):
     """
     Permite o download de um relatório específico.

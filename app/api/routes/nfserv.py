@@ -8,7 +8,7 @@ import traceback
 router = APIRouter(prefix="/nfserv", tags=["NFSERV"])
 logger = logging.getLogger(__name__)
 
-@router.get("/api/arquivos/{tipo}")
+@router.get("/backend/api/arquivos/{tipo}")
 async def buscar_arquivos(tipo: str):
     """Busca arquivos NFSERV no SharePoint."""
     if tipo != "NFSERV":
@@ -59,7 +59,7 @@ async def buscar_arquivos(tipo: str):
         logger.error(f"Erro ao buscar arquivos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/process")
+@router.post("/backend/process")
 async def process_nfserv_files(files: List[str]):
     """Processa os arquivos NFSERV selecionados."""
     logger.info("=== INICIANDO PROCESSAMENTO DE ARQUIVOS NFSERV ===")

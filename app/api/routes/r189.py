@@ -19,7 +19,7 @@ r189_extractor = R189Extractor()
 class ProcessFilesRequest(BaseModel):
     files: List[str]
 
-@router.get("/files")
+@router.get("/backend/files")
 async def list_r189_files():
     """Lista os arquivos R189 disponíveis no SharePoint"""
     try:
@@ -57,7 +57,7 @@ async def list_r189_files():
             detail=str(e)
         )
 
-@router.post("/process")
+@router.post("/backend/process")
 async def process_files(request: ProcessFilesRequest):
     """Processa arquivos R189 selecionados"""
     try:
@@ -199,7 +199,7 @@ PASTAS = {
     'MUN_CODE': "/teams/BR-TI-TIN/AutomaoFinanas/R189"
 }
 
-@router.get("/api/arquivos/{tipo}")
+@router.get("/backend/api/arquivos/{tipo}")
 async def buscar_arquivos(tipo: str):
     """Busca arquivos no SharePoint."""
     logger.info(f"Recebida requisição para tipo: {tipo}")  # Add this log
@@ -285,7 +285,7 @@ PASTAS = {
     'MUN_CODE': "/teams/BR-TI-TIN/AutomaoFinanas/R189"
 }
 
-@router.get("/api/arquivos/{tipo}")
+@router.get("/backend/api/arquivos/{tipo}")
 async def buscar_arquivos(tipo: str):
     """Busca arquivos no SharePoint."""
     logger.info(f"Recebida requisição para tipo: {tipo}")
@@ -349,7 +349,7 @@ async def buscar_arquivos(tipo: str):
         logger.error(f"Erro ao buscar arquivos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/api/processar/r189")
+@router.post("/backend/api/processar/r189")
 async def processar_arquivos(files: List[str]):
     """Processa os arquivos R189 selecionados."""
     try:

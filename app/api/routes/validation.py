@@ -13,7 +13,7 @@ from app.core.reports.consolidated_report import ConsolidatedReport
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.post("/mun_code_r189")
+@router.post("/backend/mun_code_r189")
 async def validate_mun_code_r189():
     """
     Executa a validação entre MUN_CODE e R189
@@ -35,7 +35,7 @@ async def validate_mun_code_r189():
             "error": f"Erro na validação: {str(e)}"
         }
 
-@router.post("/r189")
+@router.post("/backend/r189")
 async def validate_r189():
     """
     Valida os dados do R189 e gera relatório de divergências.
@@ -55,7 +55,7 @@ async def validate_r189():
         logger.exception(f"Erro na validação R189: {str(e)}")
         return {"success": False, "error": f"Erro na validação R189: {str(e)}"}
 
-@router.post("/qpe_r189", response_model=Dict[str, Any])
+@router.post("/backend/qpe_r189", response_model=Dict[str, Any])
 async def validate_qpe_r189():
     """
     Valida divergências entre QPE e R189.
@@ -76,7 +76,7 @@ async def validate_qpe_r189():
             "show_popup": True
         }
 
-@router.post("/spb_r189", response_model=Dict[str, Any])
+@router.post("/backend/spb_r189", response_model=Dict[str, Any])
 async def validate_spb_r189():
     """
     Valida divergências entre SPB e R189.
@@ -96,7 +96,7 @@ async def validate_spb_r189():
             "show_popup": True
         }
 
-@router.post("/nfserv_r189")
+@router.post("/backend/nfserv_r189")
 async def validate_nfserv_r189():
     """
     Valida divergências entre NFSERV e R189.
@@ -116,7 +116,7 @@ async def validate_nfserv_r189():
             "show_popup": True
         }
 
-@router.post("/consolidate_reports")
+@router.post("/backend/consolidate_reports")
 async def consolidate_reports():
     """
     Consolida os relatórios mais recentes em um único arquivo Excel.
