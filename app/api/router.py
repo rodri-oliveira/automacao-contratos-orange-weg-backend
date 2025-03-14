@@ -13,7 +13,7 @@ from app.core.extractors.r189_extractor import R189Extractor
 logger = logging.getLogger(__name__)
 
 # Criar o router
-api_router = APIRouter()
+api_router = APIRouter(prefix="/backend")
 
 # Carregar variáveis de ambiente
 load_dotenv()
