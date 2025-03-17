@@ -25,7 +25,7 @@ PASTAS = {
     'CONSOLIDADO': '/teams/BR-TI-TIN/AutomaoFinanas/CONSOLIDADO'
 }
 
-@api_router.get("/backend/arquivos/{tipo}")
+@api_router.get("/arquivos/{tipo}")
 async def buscar_arquivos(tipo: str):
     """Busca arquivos na pasta especificada do SharePoint."""
     logger.info(f"Buscando arquivos do tipo: {tipo}")
@@ -77,7 +77,7 @@ async def buscar_arquivos(tipo: str):
         logger.error(f"Erro ao buscar arquivos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@api_router.post("/backend/api/processar/R189")
+@api_router.post("/backend/processar/R189")
 async def processar_r189(arquivos: List[str]):
     logger.info(f"Iniciando processamento de arquivos R189: {arquivos}")
     try:
@@ -160,8 +160,8 @@ async def processar_r189(arquivos: List[str]):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Incluir rotas
-api_router.include_router(r189.router, prefix="/backend/r189", tags=["R189"])
-api_router.include_router(sharepoint.router, prefix="/backend/sharepoint", tags=["SharePoint"])
-api_router.include_router(reports.router, prefix="/backend/reports", tags=["Reports"])
-api_router.include_router(items.router, prefix="/backend/items", tags=["Items"])
-api_router.include_router(files.router, prefix="/backend/files", tags=["Files"])
+api_router.include_router(r189.router, prefix="/r189", tags=["R189"])
+api_router.include_router(sharepoint.router, prefix="/sharepoint", tags=["SharePoint"])
+api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])
+api_router.include_router(items.router, prefix="/items", tags=["Items"])
+api_router.include_router(files.router, prefix="/files", tags=["Files"])

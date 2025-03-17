@@ -8,7 +8,7 @@ import traceback
 router = APIRouter(prefix="/spb", tags=["SPB"])
 logger = logging.getLogger(__name__)
 
-@router.get("/backend/api/arquivos/{tipo}")
+@router.get("/backend/arquivos/{tipo}")
 async def buscar_arquivos(tipo: str):
     """Busca arquivos SPB no SharePoint."""
     if tipo != "SPB":
@@ -59,7 +59,7 @@ async def buscar_arquivos(tipo: str):
         logger.error(f"Erro ao buscar arquivos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/backend/process")
+@router.post("/process")
 async def process_spb_files(files: List[str]):
     """Processa os arquivos SPB selecionados."""
     logger.info("=== INICIANDO PROCESSAMENTO DE ARQUIVOS SPB ===")

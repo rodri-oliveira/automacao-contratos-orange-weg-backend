@@ -22,7 +22,7 @@ qpe_extractor = QPEExtractor()
 class ProcessFilesRequest(BaseModel):
     files: List[str]
 
-@router.get("/backend/files")
+@router.get("/files")
 async def list_r189_files():
     """Lista os arquivos R189 disponíveis no SharePoint"""
     try:
@@ -60,7 +60,7 @@ async def list_r189_files():
             detail=str(e)
         )
 
-@router.post("/backend/process")
+@router.post("/process")
 async def process_qpe_files(files: List[str]):
     """Processa os arquivos QPE selecionados."""
     logger.info("=== INICIANDO PROCESSAMENTO DE ARQUIVOS QPE ===")
@@ -85,7 +85,7 @@ async def process_qpe_files(files: List[str]):
         logger.error(traceback.format_exc())
         return {"success": False, "error": str(e)}
 
-@router.get("/backend/verify/{file_name}")
+@router.get("/verify/{file_name}")
 async def verify_file(file_name: str):
     """Verifica se um arquivo consolidado existe"""
     try:
@@ -109,7 +109,7 @@ async def verify_file(file_name: str):
             detail=str(e)
         )
 
-@router.get("/backend/download/{file_name}")
+@router.get("/download/{file_name}")
 async def download_file(file_name: str):
     """Download de um arquivo R189 consolidado"""
     try:
@@ -147,7 +147,7 @@ PASTAS = {
     'MUN_CODE': "/teams/BR-TI-TIN/AutomaoFinanas/R189"
 }
 
-@router.get("/backend/api/arquivos/{tipo}")
+@router.get("/backend/arquivos/{tipo}")
 async def buscar_arquivos(tipo: str):
     """Busca arquivos no SharePoint."""
     logger.info(f"Iniciando busca de arquivos do tipo: {tipo}")
@@ -201,7 +201,7 @@ async def buscar_arquivos(tipo: str):
         logger.error(f"Erro ao buscar arquivos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/backend/test")
+@router.post("/test")
 async def test_qpe_route(files: List[str]):
     """Rota de teste para verificar a recepção de dados."""
     return {

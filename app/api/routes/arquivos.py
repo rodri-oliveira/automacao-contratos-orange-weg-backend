@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.get("/backend/{tipo}")
+@router.get("/{tipo}")
 async def list_files(tipo: str):
     """
     Lista os arquivos do tipo especificado disponíveis no SharePoint
