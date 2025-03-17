@@ -1,7 +1,10 @@
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 import logging
+import os
+import re
+
 from app.core.auth import SharePointAuth
 from app.core.sharepoint import SharePointClient
 
@@ -36,68 +39,124 @@ class ConsolidatedReport:
                 "NFSERV_vs_R189": pd.DataFrame({"Mensagem": ["Relatório não disponível"]})
             }
             
-            # Lista de arquivos específicos para tentar baixar (baseado nos exemplos fornecidos)
+            # Lista de arquivos para buscar
             specific_files = [
                 {
                     "folder": "MUN_CODE",
                     "sheet_name": "Mun_Code_R189",
-                    "filename": "report_mun_code_r189_20250312_102552.xlsx"
+                    "filenames": [
+                        "report_mun_code_r189_20250317_165659.xlsx",
+                        "report_mun_code_r189_20250316_165659.xlsx",
+                        "report_mun_code_r189_20250315_165659.xlsx"
+                    ]
                 },
                 {
                     "folder": "R189",
                     "sheet_name": "Divergencias_R189",
-                    "filename": "report_divergencias_r189_20250312_092310.xlsx"
+                    "filenames": [
+                        "report_divergencias_r189_20250317_165704.xlsx",
+                        "report_divergencias_r189_20250316_165704.xlsx",
+                        "report_divergencias_r189_20250315_165704.xlsx"
+                    ]
                 },
                 {
                     "folder": "QPE_R189",
                     "sheet_name": "QPE_vs_R189",
-                    "filename": "20250312_092337_divergencias_qpe_r189.xlsx"
+                    "filenames": [
+                        "20250317_165720_divergencias_qpe_r189.xlsx",
+                        "20250316_165720_divergencias_qpe_r189.xlsx",
+                        "20250315_165720_divergencias_qpe_r189.xlsx"
+                    ]
                 },
                 {
                     "folder": "SPO_R189",
                     "sheet_name": "SPB_vs_R189",
-                    "filename": "report_divergencias_spb_r189_20250312_093327.xlsx"
+                    "filenames": [
+                        "report_divergencias_spb_r189_20250317_165714.xlsx",
+                        "report_divergencias_spb_r189_20250316_165714.xlsx",
+                        "report_divergencias_spb_r189_20250315_165714.xlsx"
+                    ]
                 },
                 {
                     "folder": "NFSERV_R189",
                     "sheet_name": "NFSERV_vs_R189",
-                    "filename": "20250312_094849_divergencias_nfserv_r189.xlsx"
+                    "filenames": [
+                        "20250317_165724_divergencias_nfserv_r189.xlsx",
+                        "20250316_165724_divergencias_nfserv_r189.xlsx",
+                        "20250315_165724_divergencias_nfserv_r189.xlsx"
+                    ]
                 }
             ]
+            
+            # Hoje e dias anteriores
+            today = datetime.now()
+            yesterday = today - timedelta(days=1)
+            two_days_ago = today - timedelta(days=2)
+            
+            # Datas formatadas
+            dates = [
+                today.strftime('%Y%m%d'),
+                yesterday.strftime('%Y%m%d'),
+                two_days_ago.strftime('%Y%m%d')
+            ]
+            
+            # Adiciona arquivos com datas atuais
+            for file_info in specific_files:
+                # Gera nomes atualizados baseados na data atual
+                if "filenames" in file_info:
+                    base_filename = file_info["filenames"][0]
+                    current_filenames = []
+                    
+                    # Para cada data, gera um nome de arquivo
+                    for date in dates:
+                        if "_20" in base_filename:  # Contém data no formato _YYYYMMDD_
+                            parts = base_filename.split("_20")
+                            if len(parts) >= 2:
+                                # Reconstrói com a nova data
+                                new_filename = f"{parts[0]}_20{date}{parts[1][8:]}"
+                                current_filenames.append(new_filename)
+                    
+                    # Adiciona os nomes gerados à lista
+                    file_info["filenames"].extend(current_filenames)
             
             # Contador de relatórios encontrados
             found_reports = 0
             
-            # Para cada arquivo específico, tenta baixá-lo
+            # Para cada tipo de arquivo
             for file_info in specific_files:
                 folder = file_info["folder"]
                 sheet_name = file_info["sheet_name"]
-                filename = file_info["filename"]
+                filenames = file_info["filenames"]
+                
                 folder_path = f"{self.relatorios_base_path}/{folder}"
+                logger.info(f"Buscando arquivos na pasta {folder_path}")
                 
-                logger.info(f"Tentando baixar arquivo {filename} da pasta {folder_path}")
-                
-                # Tenta baixar o arquivo
-                file_content = self.sharepoint_auth.baixar_arquivo_sharepoint(
-                    filename,
-                    folder_path
-                )
-                
-                # Se conseguiu baixar o arquivo, lê o conteúdo
-                if file_content is not None:
-                    try:
-                        # Lê o arquivo Excel
-                        df = pd.read_excel(BytesIO(file_content))
-                        
-                        # Se o DataFrame não estiver vazio, armazena-o
-                        if not df.empty:
-                            reports_data[sheet_name] = df
-                            found_reports += 1
-                            logger.info(f"Arquivo {filename} lido com sucesso: {len(df)} linhas")
-                    except Exception as e:
-                        logger.error(f"Erro ao ler arquivo {filename}: {str(e)}")
-                else:
-                    logger.warning(f"Arquivo {filename} não encontrado na pasta {folder_path}")
+                # Tenta cada nome de arquivo na lista
+                for filename in filenames:
+                    logger.info(f"Tentando baixar arquivo {filename}")
+                    
+                    # Tenta baixar o arquivo
+                    file_content = self.sharepoint_auth.baixar_arquivo_sharepoint(
+                        filename,
+                        folder_path
+                    )
+                    
+                    # Se conseguiu baixar o arquivo
+                    if file_content is not None:
+                        try:
+                            # Lê o arquivo Excel
+                            df = pd.read_excel(BytesIO(file_content))
+                            
+                            # Se o DataFrame não estiver vazio
+                            if not df.empty:
+                                reports_data[sheet_name] = df
+                                found_reports += 1
+                                logger.info(f"Arquivo {filename} lido com sucesso: {len(df)} linhas")
+                                break  # Encontrou um arquivo válido, sai do loop
+                        except Exception as e:
+                            logger.error(f"Erro ao ler arquivo {filename}: {str(e)}")
+                    else:
+                        logger.warning(f"Arquivo {filename} não encontrado")
             
             # Cria o arquivo Excel consolidado
             logger.info("Criando arquivo Excel consolidado")
@@ -163,4 +222,4 @@ class ConsolidatedReport:
                 "success": False,
                 "error": f"Erro inesperado ao consolidar relatórios: {str(e)}",
                 "show_popup": True
-            } 
+            }
