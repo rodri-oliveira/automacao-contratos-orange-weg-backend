@@ -60,7 +60,7 @@ async def list_r189_files():
             detail=str(e)
         )
 
-@router.post("backend/process")
+@router.post("/process")
 async def process_qpe_files(files: List[str]):
     """Processa os arquivos QPE selecionados."""
     logger.info("=== INICIANDO PROCESSAMENTO DE ARQUIVOS QPE ===")

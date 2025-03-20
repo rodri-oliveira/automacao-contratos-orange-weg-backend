@@ -199,7 +199,7 @@ PASTAS = {
     'MUN_CODE': "/teams/BR-TI-TIN/AutomaoFinanas/R189"
 }
 
-@router.get("/backend/arquivos/{tipo}")
+@router.get("/arquivos/{tipo}")
 async def buscar_arquivos(tipo: str):
     """Busca arquivos no SharePoint."""
     logger.info(f"Recebida requisição para tipo: {tipo}")  # Add this log
@@ -285,7 +285,7 @@ PASTAS = {
     'MUN_CODE': "/teams/BR-TI-TIN/AutomaoFinanas/R189"
 }
 
-@router.get("/backend/arquivos/{tipo}")
+@router.get("/arquivos/{tipo}")
 async def buscar_arquivos(tipo: str):
     """Busca arquivos no SharePoint."""
     logger.info(f"Recebida requisição para tipo: {tipo}")
@@ -349,7 +349,7 @@ async def buscar_arquivos(tipo: str):
         logger.error(f"Erro ao buscar arquivos: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/backend/processar/r189")
+@router.post("/processar/r189")
 async def processar_arquivos(files: List[str]):
     """Processa os arquivos R189 selecionados."""
     try:
