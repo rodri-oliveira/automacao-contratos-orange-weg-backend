@@ -13,4 +13,3 @@ python-dotenv==1.0.1
 office365-rest-python-client==2.5.0
 aiohttp==3.9.3
 xlsxwriter>=3.0.0
-
