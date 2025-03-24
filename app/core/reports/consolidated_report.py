@@ -20,143 +20,135 @@ class ConsolidatedReport:
         self.sharepoint_client = SharePointClient()
         self.relatorios_base_path = "/teams/BR-TI-TIN/AutomaoFinanas/RELATÓRIOS"
         
+    async def _list_files_in_folder(self, folder_path):
+        """
+        Lista todos os arquivos Excel em uma pasta do SharePoint.
+        """
+        token = self.sharepoint_auth.acquire_token()
+        if not token:
+            logger.error("Falha ao obter token para listar arquivos")
+            return []
+        
+        api_url = f"{self.sharepoint_auth.site_url}/_api/web/GetFolderByServerRelativeUrl('{folder_path}')/Files"
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json;odata=verbose"
+        }
+        
+        try:
+            response = await self.sharepoint_auth.fazer_requisicao_sharepoint(api_url, headers)
+            
+            if response.get('status_code') == 200:
+                text = response.get('text', '{}')
+                import json
+                data = json.loads(text)
+                files = data.get('d', {}).get('results', [])
+                
+                # Filtra apenas arquivos Excel
+                excel_files = [f for f in files if f.get('Name', '').lower().endswith(('.xlsx', '.xls'))]
+                
+                return excel_files
+            else:
+                logger.error(f"Erro ao listar arquivos: {response.get('status_code')}")
+                return []
+        except Exception as e:
+            logger.error(f"Exceção ao listar arquivos: {str(e)}")
+            return []
+    
+    def _extract_date_from_filename(self, filename):
+        """
+        Extrai data e hora de um nome de arquivo com formato de data (AAAAMMDD_HHMMSS).
+        """
+        # Busca padrão de data no nome do arquivo
+        pattern = r'(\d{8}_\d{6})'  # Formato: AAAAMMDD_HHMMSS
+        match = re.search(pattern, filename)
+        
+        if match:
+            try:
+                # Converte para objeto datetime
+                date_str = match.group(1)
+                date_obj = datetime.strptime(date_str, "%Y%m%d_%H%M%S")
+                return date_obj
+            except ValueError:
+                pass
+        
+        # Retorna data antiga se não encontrar padrão válido
+        return datetime(1900, 1, 1)
+    
+    async def _get_latest_file(self, folder_path):
+        """
+        Obtém o arquivo Excel mais recente de uma pasta.
+        """
+        files = await self._list_files_in_folder(folder_path)
+        
+        if not files:
+            logger.warning(f"Nenhum arquivo encontrado em: {folder_path}")
+            return None
+        
+        # Ordena pelo timestamp extraído do nome do arquivo
+        latest_file = max(files, key=lambda f: self._extract_date_from_filename(f.get('Name', '')))
+        
+        logger.info(f"Arquivo mais recente encontrado: {latest_file.get('Name')}")
+        
+        # Baixa o conteúdo do arquivo
+        file_content = self.sharepoint_auth.baixar_arquivo_sharepoint(
+            latest_file.get('Name'),
+            folder_path
+        )
+        
+        if file_content:
+            return {
+                'name': latest_file.get('Name'),
+                'content': file_content
+            }
+        
+        return None
+        
     async def consolidate_reports(self):
         """
         Cria um relatório consolidado com abas para cada tipo de relatório.
-        
-        Returns:
-            dict: Resultado da consolidação
         """
         try:
             logger.info("=== INICIANDO CRIAÇÃO DE RELATÓRIO CONSOLIDADO ===")
             
-            # Cria um DataFrame vazio para cada tipo de relatório
+            # Define as pastas e nomes das abas
+            folders = [
+                {"path": "MUN_CODE", "sheet_name": "Mun_Code_R189"},
+                {"path": "R189", "sheet_name": "Divergencias_R189"},
+                {"path": "QPE_R189", "sheet_name": "QPE_vs_R189"},
+                {"path": "SPO_R189", "sheet_name": "SPB_vs_R189"},
+                {"path": "NFSERV_R189", "sheet_name": "NFSERV_vs_R189"}
+            ]
+            
+            # Cria DataFrames vazios para o caso de não encontrar arquivos
             reports_data = {
-                "Mun_Code_R189": pd.DataFrame({"Mensagem": ["Relatório não disponível"]}),
-                "Divergencias_R189": pd.DataFrame({"Mensagem": ["Relatório não disponível"]}),
-                "QPE_vs_R189": pd.DataFrame({"Mensagem": ["Relatório não disponível"]}),
-                "SPB_vs_R189": pd.DataFrame({"Mensagem": ["Relatório não disponível"]}),
-                "NFSERV_vs_R189": pd.DataFrame({"Mensagem": ["Relatório não disponível"]})
+                folder["sheet_name"]: pd.DataFrame({"Mensagem": ["Relatório não disponível"]})
+                for folder in folders
             }
-            
-            # Lista de arquivos para buscar
-            specific_files = [
-                {
-                    "folder": "MUN_CODE",
-                    "sheet_name": "Mun_Code_R189",
-                    "filenames": [
-                        "report_mun_code_r189_20250317_165659.xlsx",
-                        "report_mun_code_r189_20250316_165659.xlsx",
-                        "report_mun_code_r189_20250315_165659.xlsx"
-                    ]
-                },
-                {
-                    "folder": "R189",
-                    "sheet_name": "Divergencias_R189",
-                    "filenames": [
-                        "report_divergencias_r189_20250317_165704.xlsx",
-                        "report_divergencias_r189_20250316_165704.xlsx",
-                        "report_divergencias_r189_20250315_165704.xlsx"
-                    ]
-                },
-                {
-                    "folder": "QPE_R189",
-                    "sheet_name": "QPE_vs_R189",
-                    "filenames": [
-                        "20250317_165720_divergencias_qpe_r189.xlsx",
-                        "20250316_165720_divergencias_qpe_r189.xlsx",
-                        "20250315_165720_divergencias_qpe_r189.xlsx"
-                    ]
-                },
-                {
-                    "folder": "SPO_R189",
-                    "sheet_name": "SPB_vs_R189",
-                    "filenames": [
-                        "report_divergencias_spb_r189_20250317_165714.xlsx",
-                        "report_divergencias_spb_r189_20250316_165714.xlsx",
-                        "report_divergencias_spb_r189_20250315_165714.xlsx"
-                    ]
-                },
-                {
-                    "folder": "NFSERV_R189",
-                    "sheet_name": "NFSERV_vs_R189",
-                    "filenames": [
-                        "20250317_165724_divergencias_nfserv_r189.xlsx",
-                        "20250316_165724_divergencias_nfserv_r189.xlsx",
-                        "20250315_165724_divergencias_nfserv_r189.xlsx"
-                    ]
-                }
-            ]
-            
-            # Hoje e dias anteriores
-            today = datetime.now()
-            yesterday = today - timedelta(days=1)
-            two_days_ago = today - timedelta(days=2)
-            
-            # Datas formatadas
-            dates = [
-                today.strftime('%Y%m%d'),
-                yesterday.strftime('%Y%m%d'),
-                two_days_ago.strftime('%Y%m%d')
-            ]
-            
-            # Adiciona arquivos com datas atuais
-            for file_info in specific_files:
-                # Gera nomes atualizados baseados na data atual
-                if "filenames" in file_info:
-                    base_filename = file_info["filenames"][0]
-                    current_filenames = []
-                    
-                    # Para cada data, gera um nome de arquivo
-                    for date in dates:
-                        if "_20" in base_filename:  # Contém data no formato _YYYYMMDD_
-                            parts = base_filename.split("_20")
-                            if len(parts) >= 2:
-                                # Reconstrói com a nova data
-                                new_filename = f"{parts[0]}_20{date}{parts[1][8:]}"
-                                current_filenames.append(new_filename)
-                    
-                    # Adiciona os nomes gerados à lista
-                    file_info["filenames"].extend(current_filenames)
             
             # Contador de relatórios encontrados
             found_reports = 0
             
-            # Para cada tipo de arquivo
-            for file_info in specific_files:
-                folder = file_info["folder"]
-                sheet_name = file_info["sheet_name"]
-                filenames = file_info["filenames"]
+            # Processa cada pasta
+            for folder_info in folders:
+                folder_path = f"{self.relatorios_base_path}/{folder_info['path']}"
+                logger.info(f"Buscando o arquivo mais recente em: {folder_path}")
                 
-                folder_path = f"{self.relatorios_base_path}/{folder}"
-                logger.info(f"Buscando arquivos na pasta {folder_path}")
+                # Obtém o arquivo mais recente
+                file_data = await self._get_latest_file(folder_path)
                 
-                # Tenta cada nome de arquivo na lista
-                for filename in filenames:
-                    logger.info(f"Tentando baixar arquivo {filename}")
-                    
-                    # Tenta baixar o arquivo
-                    file_content = self.sharepoint_auth.baixar_arquivo_sharepoint(
-                        filename,
-                        folder_path
-                    )
-                    
-                    # Se conseguiu baixar o arquivo
-                    if file_content is not None:
-                        try:
-                            # Lê o arquivo Excel
-                            df = pd.read_excel(BytesIO(file_content))
-                            
-                            # Se o DataFrame não estiver vazio
-                            if not df.empty:
-                                reports_data[sheet_name] = df
-                                found_reports += 1
-                                logger.info(f"Arquivo {filename} lido com sucesso: {len(df)} linhas")
-                                break  # Encontrou um arquivo válido, sai do loop
-                        except Exception as e:
-                            logger.error(f"Erro ao ler arquivo {filename}: {str(e)}")
-                    else:
-                        logger.warning(f"Arquivo {filename} não encontrado")
+                if file_data:
+                    try:
+                        # Lê o arquivo Excel
+                        df = pd.read_excel(BytesIO(file_data['content']))
+                        
+                        if not df.empty:
+                            reports_data[folder_info['sheet_name']] = df
+                            found_reports += 1
+                            logger.info(f"Arquivo {file_data['name']} lido com sucesso: {len(df)} linhas")
+                    except Exception as e:
+                        logger.error(f"Erro ao processar arquivo {file_data['name']}: {str(e)}")
             
             # Cria o arquivo Excel consolidado
             logger.info("Criando arquivo Excel consolidado")
