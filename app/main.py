@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import r189, qpe, spb, nfserv, municipality_code, validation
+from app.api.routes import r189, qpe, spb, nfserv, municipality_code, validation, file_processor
 
 app = FastAPI(
     title="Automação Finanças API",
@@ -24,3 +24,4 @@ app.include_router(spb.router, prefix="/backend")
 app.include_router(nfserv.router, prefix="/backend")
 app.include_router(municipality_code.router, prefix="/backend")
 app.include_router(validation.router, prefix="/backend/validations", tags=["Validations"])
+app.include_router(file_processor.router, prefix="/backend/files", tags=["File Processor"])
