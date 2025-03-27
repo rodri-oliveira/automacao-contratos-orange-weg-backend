@@ -1812,7 +1812,9 @@ async def move_files_to_destinations(token, site_url, files_list):
 async def move_files_to_destinations():
     """
     Move arquivos da pasta ENTRADA para suas respectivas pastas de destino.
-    IMPORTANTE: NÃO exclui os arquivos da pasta ENTRADA, apenas faz cópia.
+    IMPORTANTE: 
+    - Os arquivos são mantidos na pasta ENTRADA após o envio
+    - A pasta R189 NÃO é limpa, apenas QPE, NFSERV e SPB
     """
     start_time = time.time()
     try:
@@ -1831,13 +1833,14 @@ async def move_files_to_destinations():
         site_url = auth.site_url
         logger.info(f"Autenticação bem-sucedida! Site URL: {site_url}")
         
-        # ETAPA 1: LIMPAR TODAS AS PASTAS DE DESTINO (não limpa a ENTRADA)
+        # ETAPA 1: LIMPAR PASTAS DE DESTINO (EXCETO R189)
         logger.info("")
         logger.info("===== ETAPA 1: LIMPANDO PASTAS DE DESTINO =====")
         logger.info("IMPORTANTE: A pasta ENTRADA NÃO será limpa, apenas as pastas de destino")
+        logger.info("IMPORTANTE: A pasta R189 NÃO será limpa conforme solicitado!")
         
-        # Lista de pastas para limpar (todas exceto ENTRADA)
-        destination_folders = ["QPE", "NFSERV", "SPB", "R189"]
+        # Lista de pastas para limpar (todas exceto ENTRADA e R189)
+        destination_folders = ["QPE", "NFSERV", "SPB"]  # Removido R189
         cleanup_results = {}
         
         # Limpar cada pasta de destino
@@ -1882,14 +1885,18 @@ async def move_files_to_destinations():
             
             logger.info(f"RESULTADO LIMPEZA {folder_name}: {deleted_count}/{total_files} arquivos excluídos")
         
-        logger.info("")
-        logger.info("LIMPEZA DE TODAS AS PASTAS DE DESTINO CONCLUÍDA!")
-        logger.info(f"QPE: {cleanup_results['QPE']['deleted']}/{cleanup_results['QPE']['total_files']} excluídos")
-        logger.info(f"NFSERV: {cleanup_results['NFSERV']['deleted']}/{cleanup_results['NFSERV']['total_files']} excluídos")
-        logger.info(f"SPB: {cleanup_results['SPB']['deleted']}/{cleanup_results['SPB']['total_files']} excluídos")
-        logger.info(f"R189: {cleanup_results['R189']['deleted']}/{cleanup_results['R189']['total_files']} excluídos")
+        # Adicionar R189 como "preservada" no resultado
+        cleanup_results["R189"] = {"total_files": "N/A", "deleted": 0, "preservada": True}
         
-        # ETAPA 2: MOVER ARQUIVOS DA ENTRADA PARA AS PASTAS LIMPAS
+        logger.info("")
+        logger.info("LIMPEZA DAS PASTAS DE DESTINO CONCLUÍDA!")
+        logger.info(f"QPE: {cleanup_results.get('QPE', {}).get('deleted', 0)}/{cleanup_results.get('QPE', {}).get('total_files', 0)} excluídos")
+        logger.info(f"NFSERV: {cleanup_results.get('NFSERV', {}).get('deleted', 0)}/{cleanup_results.get('NFSERV', {}).get('total_files', 0)} excluídos")
+        logger.info(f"SPB: {cleanup_results.get('SPB', {}).get('deleted', 0)}/{cleanup_results.get('SPB', {}).get('total_files', 0)} excluídos")
+        logger.info(f"R189: Pasta PRESERVADA conforme solicitado!")
+        
+        # O resto da função permanece exatamente igual...
+        # ETAPA 2: MOVER ARQUIVOS DA ENTRADA PARA AS PASTAS DE DESTINO
         logger.info("")
         logger.info("===== ETAPA 2: MOVENDO ARQUIVOS DA ENTRADA PARA PASTAS DE DESTINO =====")
         logger.info("IMPORTANTE: Os arquivos serão MANTIDOS na pasta ENTRADA após o envio")
@@ -2127,5 +2134,77 @@ async def process_complete():
         
     except Exception as e:
         logger.error(f"Erro no processo completo: {str(e)}")
+        logger.exception("Detalhes do erro:")
+        return {"success": False, "message": f"Erro: {str(e)}"}
+
+@router.post("/reset-process")
+async def reset_process():
+    """
+    Reseta o processo: limpa as pastas QPE, NFSERV e SPB (preservando R189 e ENTRADA).
+    """
+    try:
+        logger.info("==================== INICIANDO RESET DE PROCESSO ====================")
+        
+        # Autenticar no SharePoint
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        
+        if not token:
+            logger.error("ERRO: Falha na autenticação com SharePoint!")
+            return {"success": False, "message": "Falha na autenticação com SharePoint"}
+            
+        site_url = auth.site_url
+        
+        # Lista de pastas para limpar
+        pastas_para_limpar = ["QPE", "NFSERV", "SPB"]
+        resultados = {}
+        
+        # Limpar cada pasta
+        for pasta in pastas_para_limpar:
+            try:
+                caminho = PATHS[pasta]
+                logger.info(f"Limpando pasta {pasta}: {caminho}")
+                
+                # Listar arquivos
+                arquivos = await list_files(token, site_url, caminho)
+                
+                if not arquivos:
+                    logger.info(f"Pasta {pasta} já está vazia")
+                    resultados[pasta] = {"total": 0, "excluidos": 0}
+                    continue
+                    
+                # Excluir arquivos
+                contador = 0
+                for arquivo in arquivos:
+                    nome_arquivo = arquivo.get("Name", "")
+                    
+                    try:
+                        sucesso = await delete_file(token, site_url, caminho, nome_arquivo)
+                        if sucesso:
+                            contador += 1
+                            logger.info(f"Arquivo excluído: {nome_arquivo}")
+                        else:
+                            logger.error(f"Falha ao excluir: {nome_arquivo}")
+                    except Exception as e:
+                        logger.error(f"Erro ao excluir {nome_arquivo}: {str(e)}")
+                
+                resultados[pasta] = {"total": len(arquivos), "excluidos": contador}
+                logger.info(f"Pasta {pasta}: {contador} de {len(arquivos)} arquivos excluídos")
+                
+            except Exception as e:
+                logger.error(f"Erro ao limpar pasta {pasta}: {str(e)}")
+                resultados[pasta] = {"erro": str(e)}
+        
+        # Limpar cache
+        clear_sharepoint_cache()
+        
+        return {
+            "success": True,
+            "message": "Processo resetado com sucesso",
+            "detalhes": resultados
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro geral ao resetar processo: {str(e)}")
         logger.exception("Detalhes do erro:")
         return {"success": False, "message": f"Erro: {str(e)}"}
