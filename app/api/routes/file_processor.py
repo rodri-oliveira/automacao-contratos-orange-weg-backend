@@ -1812,7 +1812,7 @@ async def move_files_to_destinations(token, site_url, files_list):
 async def move_files_to_destinations():
     """
     Move arquivos da pasta ENTRADA para suas respectivas pastas de destino.
-    Nova implementação com regras de negócio ajustadas.
+    IMPORTANTE: NÃO exclui os arquivos da pasta ENTRADA, apenas faz cópia.
     """
     start_time = time.time()
     try:
@@ -1892,6 +1892,7 @@ async def move_files_to_destinations():
         # ETAPA 2: MOVER ARQUIVOS DA ENTRADA PARA AS PASTAS LIMPAS
         logger.info("")
         logger.info("===== ETAPA 2: MOVENDO ARQUIVOS DA ENTRADA PARA PASTAS DE DESTINO =====")
+        logger.info("IMPORTANTE: Os arquivos serão MANTIDOS na pasta ENTRADA após o envio")
         
         # Listar arquivos da pasta ENTRADA
         logger.info(f"Listando arquivos da pasta ENTRADA ({PATHS['ENTRADA']})...")
@@ -1989,14 +1990,8 @@ async def move_files_to_destinations():
                     continue
                 logger.info(f"Upload concluído com sucesso")
                 
-                # Excluir arquivo original após o upload bem-sucedido
-                logger.info(f"Excluindo arquivo original da pasta ENTRADA (apenas este arquivo)...")
-                delete_success = await delete_file(token, site_url, PATHS["ENTRADA"], file_name)
-                
-                if not delete_success:
-                    logger.warning(f"⚠ ATENÇÃO: Falha ao excluir arquivo original {file_name}, mas ele foi copiado para o destino")
-                else:
-                    logger.info(f"Arquivo original excluído com sucesso da pasta ENTRADA")
+                # MUDANÇA: NÃO excluir o arquivo original como solicitado
+                logger.info(f"✓ Arquivo mantido na pasta ENTRADA conforme solicitado")
                 
                 # Adicionar à lista de arquivos movidos
                 moved_files.append({
@@ -2005,7 +2000,7 @@ async def move_files_to_destinations():
                     "destination_name": destination_name
                 })
                 
-                logger.info(f"✓ SUCESSO! Arquivo {file_name} movido para {destination_name}")
+                logger.info(f"✓ SUCESSO! Arquivo {file_name} copiado para {destination_name} (original mantido)")
             
             except Exception as e:
                 logger.error(f"✗ ERRO AO PROCESSAR ARQUIVO {file_name}: {str(e)}")
@@ -2025,15 +2020,17 @@ async def move_files_to_destinations():
         logger.info("")
         logger.info("==================== RESUMO DA OPERAÇÃO ====================")
         logger.info(f"Total de arquivos encontrados na ENTRADA: {len(entrada_files)}")
-        logger.info(f"Total de arquivos movidos: {total_moved}")
+        logger.info(f"Total de arquivos copiados: {total_moved}")
         logger.info(f"Arquivos não movidos: {not_moved}")
         logger.info(f"Tempo total de execução: {total_time} segundos")
         logger.info("")
-        logger.info(f"ARQUIVOS MOVIDOS POR PASTA:")
+        logger.info(f"ARQUIVOS COPIADOS POR PASTA:")
         logger.info(f"  • QPE: {moved_to_qpe} arquivos")
         logger.info(f"  • NFSERV: {moved_to_nfserv} arquivos")
         logger.info(f"  • SPB: {moved_to_spb} arquivos")
         logger.info(f"  • R189: {moved_to_r189} arquivos")
+        logger.info("")
+        logger.info(f"IMPORTANTE: Todos os arquivos originais foram MANTIDOS na pasta ENTRADA")
         
         if not_moved > 0:
             logger.warning("")
@@ -2047,7 +2044,7 @@ async def move_files_to_destinations():
         # Retornar resultado detalhado
         return {
             "success": True,
-            "message": f"{total_moved} arquivos movidos com sucesso em {total_time}s",
+            "message": f"{total_moved} arquivos copiados com sucesso em {total_time}s (originais mantidos)",
             "limpeza": {
                 "qpe": f"Excluídos {cleanup_results['QPE']['deleted']} de {cleanup_results['QPE']['total_files']} arquivos",
                 "nfserv": f"Excluídos {cleanup_results['NFSERV']['deleted']} de {cleanup_results['NFSERV']['total_files']} arquivos", 
@@ -2078,10 +2075,11 @@ async def move_files_to_destinations():
             },
             "estatisticas": {
                 "total_analisado": len(entrada_files),
-                "total_movidos": total_moved,
+                "total_copiados": total_moved,
                 "tempo_total": total_time,
-                "arquivos_nao_movidos": not_moved,
-                "arquivos_sem_destino": files_by_destination["sem_destino"]
+                "arquivos_nao_copiados": not_moved,
+                "arquivos_sem_destino": files_by_destination["sem_destino"],
+                "originais_mantidos": True
             }
         }
         
