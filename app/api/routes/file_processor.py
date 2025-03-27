@@ -11,6 +11,7 @@ import requests
 import time
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 from app.core.auth import SharePointAuth
 
@@ -1311,4 +1312,822 @@ def _extract_text_sync(pdf_content):
         return text
     except Exception as e:
         logger.error(f"Erro na extração síncrona de texto: {str(e)}")
-        return "" 
+        return ""
+
+@router.post("/rename-and-move")
+async def rename_and_move_files():
+    """
+    Processo em duas etapas:
+    1. Renomeia os arquivos na pasta ENTRADA
+    2. Move os arquivos já renomeados para as pastas de destino
+    """
+    start_time = time.time()
+    try:
+        logger.info("=== INICIANDO PROCESSAMENTO DE ARQUIVOS (RENOMEAR E MOVER) ===")
+        
+        # Autenticar no SharePoint
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        
+        if not token:
+            return {"success": False, "message": "Falha na autenticação com SharePoint"}
+            
+        site_url = auth.site_url
+        
+        # FASE 1: RENOMEAR OS ARQUIVOS NA PASTA ENTRADA
+        logger.info("=== FASE 1: RENOMEANDO ARQUIVOS NA PASTA ENTRADA ===")
+        
+        # Listar arquivos na pasta ENTRADA
+        entrada_files = await list_files(token, site_url, PATHS["ENTRADA"], limit=1000)
+        
+        if not entrada_files:
+            return {"success": True, "message": "Nenhum arquivo encontrado para processar"}
+            
+        logger.info(f"Encontrados {len(entrada_files)} arquivos para analisar")
+        
+        # Renomear os arquivos primeiro (fase 1)
+        rename_results = await rename_files_in_folder(token, site_url, entrada_files)
+        
+        # Aguardar um momento para garantir que as operações de renomeação foram concluídas
+        await asyncio.sleep(1)
+        
+        # FASE 2: MOVER OS ARQUIVOS RENOMEADOS PARA PASTAS DE DESTINO
+        logger.info("=== FASE 2: MOVENDO ARQUIVOS PARA PASTAS DE DESTINO ===")
+        
+        # Listar novamente os arquivos na pasta ENTRADA (agora já renomeados)
+        renamed_files = await list_files(token, site_url, PATHS["ENTRADA"], limit=1000)
+        
+        if not renamed_files:
+            return {
+                "success": True, 
+                "message": "Fase 1 concluída (renomeação), mas não foram encontrados arquivos para mover",
+                "fase_1": rename_results
+            }
+        
+        logger.info(f"Encontrados {len(renamed_files)} arquivos para mover")
+        
+        # Mover os arquivos renomeados para as pastas de destino (fase 2)
+        move_results = await move_files_to_destinations(token, site_url, renamed_files)
+        
+        # Calcular tempo total
+        total_time = round(time.time() - start_time, 2)
+        
+        # Limpar caches para liberar memória
+        _file_content_cache.clear()
+        _text_cache.clear()
+        
+        # Retornar resultado combinado das duas fases
+        return {
+            "success": True,
+            "message": f"Processamento concluído em {total_time}s",
+            "renomeados": rename_results["total_renamed"],
+            "movidos": move_results["total_moved"],
+            "detalhes": {
+                "fase_1_renomeacao": rename_results,
+                "fase_2_movimentacao": move_results
+            },
+            "tempo_total": total_time
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro geral no processo de renomear e mover: {str(e)}")
+        return {"success": False, "message": f"Erro: {str(e)}"}
+
+async def rename_files_in_folder(token, site_url, files_list):
+    """
+    Renomeia arquivos na pasta ENTRADA conforme padrões específicos.
+    Os arquivos permanecem na mesma pasta após a renomeação.
+    """
+    logger.info(f"Iniciando renomeação de {len(files_list)} arquivos")
+    
+    # Função para processar um único arquivo (apenas renomeação)
+    async def process_rename_single_file(file):
+        original_name = file.get("Name", "")
+        result = {
+            "original_name": original_name,
+            "processed": True,
+            "type": None,
+            "new_name": None,
+            "success": False,
+            "error": None
+        }
+        
+        try:
+            # Verificar se o arquivo já foi renomeado
+            if original_name.startswith(("FATURA-LOCAÇÃO_", "TELECOMUNICAÇÕES_")) or re.match(r"^[A-Z\s]+_", original_name):
+                result["type"] = "already_renamed"
+                return result
+            
+            # FUNÇÃO 1: QPE- com 6 números SEM letra
+            if re.search(r"QPE-\d{6}(?![A-Za-z])", original_name):
+                result["type"] = "qpe_sem_letra"
+                logger.info(f"Arquivo identificado como QPE sem letra: {original_name}")
+                
+                # Baixar o arquivo para extrair a cidade (com cache)
+                file_content = await download_file_cached(token, site_url, PATHS["ENTRADA"], original_name)
+                if not file_content:
+                    result["error"] = "download_failed"
+                    return result
+                
+                texto_pdf = await extract_text_from_pdf_cached(file_content)
+                if not texto_pdf:
+                    result["error"] = "text_extraction_failed"
+                    return result
+                
+                # Buscar a cidade usando o regex
+                padrao_cidade = r'.*,\s*([A-Z\s]+)\s*-'
+                cidade_match = re.search(padrao_cidade, texto_pdf)
+                
+                if not cidade_match:
+                    result["error"] = "city_not_found"
+                    return result
+                
+                cidade = cidade_match.group(1).strip()
+                logger.info(f"Cidade extraída: {cidade}")
+                
+                # Novo nome com a cidade como prefixo
+                new_name = f"{cidade}_{original_name}"
+                result["new_name"] = new_name
+                logger.info(f"Novo nome será: {new_name}")
+                
+                # Fazer upload com novo nome (NA MESMA PASTA)
+                success = await upload_file(token, site_url, file_content, new_name, PATHS["ENTRADA"])
+                
+                if not success:
+                    result["error"] = "upload_failed"
+                    return result
+                
+                # Excluir o arquivo original após o upload do novo
+                delete_success = await delete_file(token, site_url, PATHS["ENTRADA"], original_name)
+                if not delete_success:
+                    logger.warning(f"Falha ao excluir arquivo original: {original_name}, mas o novo arquivo foi criado")
+                
+                result["success"] = True
+                logger.info(f"Arquivo renomeado com sucesso: {original_name} -> {new_name}")
+            
+            # FUNÇÃO 2: QPE- com 6 números COM uma letra no final
+            elif re.search(r"QPE-\d{6}[A-Za-z]", original_name):
+                result["type"] = "qpe_com_letra"
+                logger.info(f"Arquivo identificado como QPE com letra: {original_name}")
+                
+                # Novo nome com "FATURA-LOCAÇÃO" como prefixo
+                new_name = f"FATURA-LOCAÇÃO_{original_name}"
+                result["new_name"] = new_name
+                logger.info(f"Novo nome será: {new_name}")
+                
+                # Baixar o arquivo (com cache)
+                file_content = await download_file_cached(token, site_url, PATHS["ENTRADA"], original_name)
+                if not file_content:
+                    result["error"] = "download_failed"
+                    return result
+                
+                # Fazer upload com novo nome (NA MESMA PASTA)
+                success = await upload_file(token, site_url, file_content, new_name, PATHS["ENTRADA"])
+                
+                if not success:
+                    result["error"] = "upload_failed"
+                    return result
+                
+                # Excluir o arquivo original após o upload do novo
+                delete_success = await delete_file(token, site_url, PATHS["ENTRADA"], original_name)
+                if not delete_success:
+                    logger.warning(f"Falha ao excluir arquivo original: {original_name}, mas o novo arquivo foi criado")
+                
+                result["success"] = True
+                logger.info(f"Arquivo renomeado com sucesso: {original_name} -> {new_name}")
+            
+            # FUNÇÃO 3: SPB- com 6 números SEM letra no final
+            elif re.search(r"SPB-\d{6}(?![A-Za-z])", original_name):
+                result["type"] = "spb_sem_letra"
+                logger.info(f"Arquivo identificado como SPB sem letra: {original_name}")
+                
+                # Baixar o arquivo para extrair a cidade (com cache)
+                file_content = await download_file_cached(token, site_url, PATHS["ENTRADA"], original_name)
+                if not file_content:
+                    result["error"] = "download_failed"
+                    return result
+                
+                texto_pdf = await extract_text_from_pdf_cached(file_content)
+                if not texto_pdf:
+                    result["error"] = "text_extraction_failed"
+                    return result
+                
+                # Buscar a cidade usando o regex específico para SPB
+                padrao_cidade = r"CEP:\s*\d{5}-\d{3}\s*(.*?)\s*INTERMEDIÁRIO DE SERVIÇOS"
+                cidade_match = re.search(padrao_cidade, texto_pdf)
+                
+                if not cidade_match:
+                    result["error"] = "city_not_found"
+                    return result
+                
+                cidade = re.sub(r'----$', '', cidade_match.group(1)).strip()
+                logger.info(f"Cidade extraída: {cidade}")
+                
+                # Novo nome com a cidade como prefixo
+                new_name = f"{cidade}_{original_name}"
+                result["new_name"] = new_name
+                logger.info(f"Novo nome será: {new_name}")
+                
+                # Fazer upload com novo nome (NA MESMA PASTA)
+                success = await upload_file(token, site_url, file_content, new_name, PATHS["ENTRADA"])
+                
+                if not success:
+                    result["error"] = "upload_failed"
+                    return result
+                
+                # Excluir o arquivo original após o upload do novo
+                delete_success = await delete_file(token, site_url, PATHS["ENTRADA"], original_name)
+                if not delete_success:
+                    logger.warning(f"Falha ao excluir arquivo original: {original_name}, mas o novo arquivo foi criado")
+                
+                result["success"] = True
+                logger.info(f"Arquivo renomeado com sucesso: {original_name} -> {new_name}")
+            
+            # FUNÇÃO 4: Arquivos de TELECOM
+            elif re.search(r"(BLU|POA|VIX|SPB|REC|BHO)-\d{6}[A-Za-z]\d{2}", original_name):
+                result["type"] = "telecom"
+                logger.info(f"Arquivo identificado como TELECOM: {original_name}")
+                
+                # Novo nome com "TELECOMUNICAÇÕES" como prefixo
+                new_name = f"TELECOMUNICAÇÕES_{original_name}"
+                result["new_name"] = new_name
+                logger.info(f"Novo nome será: {new_name}")
+                
+                # Baixar o arquivo (com cache)
+                file_content = await download_file_cached(token, site_url, PATHS["ENTRADA"], original_name)
+                if not file_content:
+                    result["error"] = "download_failed"
+                    return result
+                
+                # Fazer upload com novo nome (NA MESMA PASTA)
+                success = await upload_file(token, site_url, file_content, new_name, PATHS["ENTRADA"])
+                
+                if not success:
+                    result["error"] = "upload_failed"
+                    return result
+                
+                # Excluir o arquivo original após o upload do novo
+                delete_success = await delete_file(token, site_url, PATHS["ENTRADA"], original_name)
+                if not delete_success:
+                    logger.warning(f"Falha ao excluir arquivo original: {original_name}, mas o novo arquivo foi criado")
+                
+                result["success"] = True
+                logger.info(f"Arquivo renomeado com sucesso: {original_name} -> {new_name}")
+            
+            else:
+                result["type"] = "no_match"
+                logger.info(f"Arquivo {original_name} não corresponde a nenhum padrão")
+            
+        except Exception as e:
+            result["error"] = str(e)
+            logger.error(f"Erro ao processar arquivo {original_name}: {str(e)}")
+        
+        return result
+    
+    # Processar arquivos em lotes para melhor controle
+    batch_size = 20
+    max_concurrent = 10  # Máximo de operações paralelas
+    all_results = []
+    
+    # Dividir em lotes
+    for i in range(0, len(files_list), batch_size):
+        batch = files_list[i:i+batch_size]
+        logger.info(f"Processando lote de renomeação {i//batch_size + 1}/{(len(files_list)+batch_size-1)//batch_size} ({len(batch)} arquivos)")
+        
+        # Criar tarefas para processamento paralelo
+        tasks = [process_rename_single_file(file) for file in batch]
+        
+        # Processar arquivos em paralelo (limitado a max_concurrent)
+        batch_results = await asyncio.gather(*tasks)
+        all_results.extend(batch_results)
+        
+        # Pequena pausa entre lotes para não sobrecarregar o servidor
+        if i + batch_size < len(files_list):
+            await asyncio.sleep(0.5)
+    
+    # Organizar resultados por tipo
+    renamed_files_qpe_sem_letra = []
+    renamed_files_qpe_com_letra = []
+    renamed_files_spb_sem_letra = []
+    renamed_files_telecom = []
+    errors = []
+    
+    for result in all_results:
+        if result["success"]:
+            file_info = {
+                "original": result["original_name"],
+                "new": result["new_name"]
+            }
+            
+            if result["type"] == "qpe_sem_letra":
+                renamed_files_qpe_sem_letra.append(file_info)
+            elif result["type"] == "qpe_com_letra":
+                renamed_files_qpe_com_letra.append(file_info)
+            elif result["type"] == "spb_sem_letra":
+                renamed_files_spb_sem_letra.append(file_info)
+            elif result["type"] == "telecom":
+                renamed_files_telecom.append(file_info)
+        elif result["error"]:
+            errors.append({
+                "file": result["original_name"],
+                "type": result["type"],
+                "error": result["error"]
+            })
+    
+    # Totais para relatório
+    total_qpe_sem_letra = len(renamed_files_qpe_sem_letra)
+    total_qpe_com_letra = len(renamed_files_qpe_com_letra)
+    total_spb_sem_letra = len(renamed_files_spb_sem_letra)
+    total_telecom = len(renamed_files_telecom)
+    total_renamed = total_qpe_sem_letra + total_qpe_com_letra + total_spb_sem_letra + total_telecom
+    
+    return {
+        "success": True,
+        "message": f"{total_renamed} arquivos renomeados com sucesso na pasta ENTRADA",
+        "total_renamed": total_renamed,
+        "detalhes": {
+            "qpe_sem_letra": {
+                "total": total_qpe_sem_letra,
+                "arquivos": renamed_files_qpe_sem_letra
+            },
+            "qpe_com_letra": {
+                "total": total_qpe_com_letra,
+                "arquivos": renamed_files_qpe_com_letra
+            },
+            "spb_sem_letra": {
+                "total": total_spb_sem_letra,
+                "arquivos": renamed_files_spb_sem_letra
+            },
+            "telecom": {
+                "total": total_telecom,
+                "arquivos": renamed_files_telecom
+            }
+        },
+        "estatisticas": {
+            "total_processado": len(all_results),
+            "total_arquivos": len(files_list),
+            "total_renomeados": total_renamed,
+            "total_erros": len(errors)
+        },
+        "erros": errors if errors else None
+    }
+
+async def move_files_to_destinations(token, site_url, files_list):
+    """
+    Move arquivos para suas respectivas pastas de destino.
+    Adicionando logs detalhados para debug de QPE e SPB.
+    """
+    logger.info("==================== INICIANDO MOVIMENTAÇÃO DE ARQUIVOS ====================")
+    
+    # Separar arquivos por destino primeiro
+    files_by_type = {
+        "NFSERV": [],
+        "QPE": [],
+        "SPB": [],
+        "sem_destino": []
+    }
+
+    # Classificar arquivos primeiro
+    for file in files_list:
+        file_name = file.get("Name", "")
+        
+        # NFSERV (manter exatamente como está, pois está funcionando)
+        if file_name.startswith(("FATURA-LOCAÇÃO_", "TELECOMUNICAÇÕES_")):
+            files_by_type["NFSERV"].append(file)
+            
+        # QPE (adicionar logs detalhados)
+        elif re.search(r"^[A-Z\s]+_QPE-\d{6}(?![A-Za-z])", file_name):
+            logger.info(f"[DEBUG-QPE] Arquivo identificado para pasta QPE: {file_name}")
+            files_by_type["QPE"].append(file)
+            
+        # SPB (adicionar logs detalhados)
+        elif re.search(r"^[A-Z\s]+_SPB-\d{6}", file_name):
+            logger.info(f"[DEBUG-SPB] Arquivo identificado para pasta SPB: {file_name}")
+            files_by_type["SPB"].append(file)
+            
+        else:
+            files_by_type["sem_destino"].append(file)
+
+    # Processar NFSERV primeiro (manter como está)
+    logger.info("=== Processando arquivos NFSERV ===")
+    for file in files_by_type["NFSERV"]:
+        # ... código existente para NFSERV ...
+        pass
+
+    # Verificar autenticação antes de processar QPE e SPB
+    logger.info("")
+    logger.info("=== VERIFICANDO AUTENTICAÇÃO PARA QPE/SPB ===")
+    try:
+        # Tentar renovar o token antes de processar QPE/SPB
+        auth = SharePointAuth()
+        new_token = auth.acquire_token()
+        if not new_token:
+            logger.error("❌ Falha ao renovar token para processamento de QPE/SPB")
+            return False
+        logger.info("✓ Token renovado com sucesso para QPE/SPB")
+        
+        # Processar QPE com logs detalhados
+        logger.info("")
+        logger.info("=== INICIANDO PROCESSAMENTO QPE ===")
+        logger.info(f"Total de arquivos QPE para processar: {len(files_by_type['QPE'])}")
+        
+        for file in files_by_type["QPE"]:
+            file_name = file.get("Name", "")
+            try:
+                logger.info(f"[QPE] Iniciando processamento do arquivo: {file_name}")
+                
+                # Download
+                logger.info(f"[QPE] Tentando download do arquivo {file_name}")
+                file_content = await download_file(new_token, site_url, PATHS["ENTRADA"], file_name)
+                if not file_content:
+                    logger.error(f"[QPE] ❌ Falha no download do arquivo {file_name}")
+                    continue
+                logger.info(f"[QPE] ✓ Download concluído: {len(file_content)} bytes")
+                
+                # Upload
+                logger.info(f"[QPE] Tentando upload para pasta QPE: {file_name}")
+                success = await upload_file(new_token, site_url, file_content, file_name, PATHS["QPE"])
+                if not success:  # <- Corrigido: indentação alinhada com o bloco try
+                    logger.error(f"[QPE] ❌ Falha no upload do arquivo {file_name}")
+                    continue
+                logger.info(f"[QPE] ✓ Upload concluído com sucesso")
+                
+                # Deletar original
+                logger.info(f"[QPE] Tentando deletar arquivo original: {file_name}")
+                delete_success = await delete_file(new_token, site_url, PATHS["ENTRADA"], file_name)
+                if not delete_success:  # <- Corrigido: indentação alinhada com o bloco try
+                    logger.warning(f"[QPE] ⚠ Arquivo copiado mas não foi possível deletar original: {file_name}")
+                else:
+                    logger.info(f"[QPE] ✓ Arquivo original deletado com sucesso")
+                
+            except Exception as e:  # <- Este except deve fechar o try
+                logger.error(f"[QPE] ❌ Erro processando arquivo {file_name}: {str(e)}")
+                logger.exception("[QPE] Detalhes do erro:")
+
+        # Processar SPB com logs detalhados
+        logger.info("")
+        logger.info("=== INICIANDO PROCESSAMENTO SPB ===")
+        logger.info(f"Total de arquivos SPB para processar: {len(files_by_type['SPB'])}")
+        
+        for file in files_by_type["SPB"]:
+            file_name = file.get("Name", "")
+            try:
+                logger.info(f"[SPB] Iniciando processamento do arquivo: {file_name}")
+                
+                # Download
+                logger.info(f"[SPB] Tentando download do arquivo {file_name}")
+                file_content = await download_file(new_token, site_url, PATHS["ENTRADA"], file_name)
+                if not file_content:
+                    logger.error(f"[SPB] ❌ Falha no download do arquivo {file_name}")
+                    continue
+                logger.info(f"[SPB] ✓ Download concluído: {len(file_content)} bytes")
+                
+                # Upload
+                logger.info(f"[SPB] Tentando upload para pasta SPB: {file_name}")
+                success = await upload_file(new_token, site_url, file_content, file_name, PATHS["SPB"])
+                if not success:
+                    logger.error(f"[SPB] ❌ Falha no upload do arquivo {file_name}")
+                    continue
+                logger.info(f"[SPB] ✓ Upload concluído com sucesso")
+                
+                # Deletar original
+                logger.info(f"[SPB] Tentando deletar arquivo original: {file_name}")
+                delete_success = await delete_file(new_token, site_url, PATHS["ENTRADA"], file_name)
+                if not delete_success:
+                    logger.warning(f"[SPB] ⚠ Arquivo copiado mas não foi possível deletar original: {file_name}")
+                else:
+                    logger.info(f"[SPB] ✓ Arquivo original deletado com sucesso")
+                
+            except Exception as e:
+                logger.error(f"[SPB] ❌ Erro processando arquivo {file_name}: {str(e)}")
+                logger.exception("[SPB] Detalhes do erro:")
+
+    except Exception as e:
+        logger.error(f"❌ Erro geral no processamento QPE/SPB: {str(e)}")
+        logger.exception("Detalhes do erro geral:")
+
+    # ... resto do código existente ...
+
+@router.post("/move-files")
+async def move_files_to_destinations():
+    """
+    Move arquivos da pasta ENTRADA para suas respectivas pastas de destino.
+    Nova implementação com regras de negócio ajustadas.
+    """
+    start_time = time.time()
+    try:
+        logger.info("==================== INICIANDO MOVIMENTAÇÃO DE ARQUIVOS ====================")
+        logger.info(f"Data/hora de início: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+        
+        # Autenticar no SharePoint
+        logger.info("Autenticando no SharePoint...")
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        
+        if not token:
+            logger.error("ERRO: Falha na autenticação com SharePoint!")
+            return {"success": False, "message": "Falha na autenticação com SharePoint"}
+            
+        site_url = auth.site_url
+        logger.info(f"Autenticação bem-sucedida! Site URL: {site_url}")
+        
+        # ETAPA 1: LIMPAR TODAS AS PASTAS DE DESTINO (não limpa a ENTRADA)
+        logger.info("")
+        logger.info("===== ETAPA 1: LIMPANDO PASTAS DE DESTINO =====")
+        logger.info("IMPORTANTE: A pasta ENTRADA NÃO será limpa, apenas as pastas de destino")
+        
+        # Lista de pastas para limpar (todas exceto ENTRADA)
+        destination_folders = ["QPE", "NFSERV", "SPB", "R189"]
+        cleanup_results = {}
+        
+        # Limpar cada pasta de destino
+        for folder_name in destination_folders:
+            folder_path = PATHS[folder_name]
+            logger.info(f"")
+            logger.info(f"LIMPANDO PASTA: {folder_name} (caminho: {folder_path})")
+            
+            # Listar arquivos na pasta
+            logger.info(f"Listando arquivos em {folder_name}...")
+            folder_files = await list_files(token, site_url, folder_path, limit=1000)
+            
+            if not folder_files:
+                logger.info(f"Pasta {folder_name} já está vazia! Nada para excluir.")
+                cleanup_results[folder_name] = {"total_files": 0, "deleted": 0}
+                continue
+            
+            # Contagem de arquivos para log
+            total_files = len(folder_files)
+            logger.info(f"ENCONTRADOS {total_files} ARQUIVOS para excluir na pasta {folder_name}")
+            
+            # Excluir cada arquivo
+            deleted_count = 0
+            for file in folder_files:
+                file_name = file.get("Name", "")
+                logger.info(f"Excluindo: {file_name}")
+                
+                success = await delete_file(token, site_url, folder_path, file_name)
+                
+                if success:
+                    deleted_count += 1
+                    logger.info(f"✓ Arquivo {file_name} excluído com sucesso")
+                else:
+                    logger.error(f"✗ ERRO ao excluir arquivo: {file_name}")
+            
+            # Registrar resultados
+            cleanup_results[folder_name] = {
+                "total_files": total_files,
+                "deleted": deleted_count,
+                "path": folder_path
+            }
+            
+            logger.info(f"RESULTADO LIMPEZA {folder_name}: {deleted_count}/{total_files} arquivos excluídos")
+        
+        logger.info("")
+        logger.info("LIMPEZA DE TODAS AS PASTAS DE DESTINO CONCLUÍDA!")
+        logger.info(f"QPE: {cleanup_results['QPE']['deleted']}/{cleanup_results['QPE']['total_files']} excluídos")
+        logger.info(f"NFSERV: {cleanup_results['NFSERV']['deleted']}/{cleanup_results['NFSERV']['total_files']} excluídos")
+        logger.info(f"SPB: {cleanup_results['SPB']['deleted']}/{cleanup_results['SPB']['total_files']} excluídos")
+        logger.info(f"R189: {cleanup_results['R189']['deleted']}/{cleanup_results['R189']['total_files']} excluídos")
+        
+        # ETAPA 2: MOVER ARQUIVOS DA ENTRADA PARA AS PASTAS LIMPAS
+        logger.info("")
+        logger.info("===== ETAPA 2: MOVENDO ARQUIVOS DA ENTRADA PARA PASTAS DE DESTINO =====")
+        
+        # Listar arquivos da pasta ENTRADA
+        logger.info(f"Listando arquivos da pasta ENTRADA ({PATHS['ENTRADA']})...")
+        entrada_files = await list_files(token, site_url, PATHS["ENTRADA"], limit=1000)
+        
+        if not entrada_files:
+            logger.warning("ATENÇÃO: Nenhum arquivo encontrado na pasta ENTRADA para mover!")
+            logger.warning("Verifique se existem arquivos na pasta ENTRADA!")
+            logger.info("==================== FIM DA EXECUÇÃO ====================")
+            return {
+                "success": True, 
+                "message": "Pastas de destino limpas, mas nenhum arquivo encontrado para mover",
+                "limpeza": cleanup_results
+            }
+            
+        logger.info(f"ENCONTRADOS {len(entrada_files)} ARQUIVOS na pasta ENTRADA")
+        for idx, file in enumerate(entrada_files):
+            logger.info(f"  {idx+1}. {file.get('Name', 'Nome não encontrado')}")
+        
+        # Processar cada arquivo e determinar para onde movê-lo
+        moved_files = []
+        files_by_destination = {
+            "QPE": [],
+            "NFSERV": [],
+            "SPB": [],
+            "R189": [],
+            "sem_destino": []
+        }
+        
+        logger.info("")
+        logger.info("Iniciando análise e movimentação dos arquivos...")
+        
+        # Processar todos os arquivos e identificar destino
+        for idx, file in enumerate(entrada_files):
+            file_name = file.get("Name", "")
+            destination = None
+            destination_name = None
+            
+            logger.info(f"")
+            logger.info(f"ARQUIVO #{idx+1}: {file_name}")
+            
+            # REGRA 1: Arquivos R189
+            if "R189" in file_name:
+                destination = PATHS["R189"]
+                destination_name = "R189"
+                logger.info(f"✓ Identificado como R189 - Será enviado para pasta {destination_name}")
+            
+            # REGRA 2: FATURA-LOCAÇÃO e TELECOMUNICAÇÕES vão para NFSERV (não mexer nesta parte)
+            elif file_name.startswith(("FATURA-LOCAÇÃO_", "TELECOMUNICAÇÕES_")):
+                destination = PATHS["NFSERV"]
+                destination_name = "NFSERV"
+                logger.info(f"✓ Identificado como {file_name.split('_')[0]} - Será enviado para pasta {destination_name}")
+            
+            # NOVOS PADRÕES: Para QPE (arquivos com QPE no nome)
+            elif "QPE-" in file_name:
+                destination = PATHS["QPE"]
+                destination_name = "QPE"
+                logger.info(f"✓ Identificado como arquivo QPE - Será enviado para pasta {destination_name}")
+                logger.info(f"   Padrão encontrado: 'QPE-' no nome do arquivo")
+            
+            # NOVOS PADRÕES: Para SPB (arquivos com SPB no nome)
+            elif "SPB-" in file_name:
+                destination = PATHS["SPB"]
+                destination_name = "SPB"
+                logger.info(f"✓ Identificado como arquivo SPB - Será enviado para pasta {destination_name}")
+                logger.info(f"   Padrão encontrado: 'SPB-' no nome do arquivo")
+            
+            # Arquivos que não correspondem a nenhum padrão
+            else:
+                logger.warning(f"⚠ ATENÇÃO: Arquivo não corresponde a nenhum padrão conhecido")
+                logger.warning(f"   Verifique se o arquivo {file_name} deveria ter sido renomeado anteriormente")
+                files_by_destination["sem_destino"].append(file_name)
+                continue
+            
+            # Adicionar à lista de arquivos por destino
+            files_by_destination[destination_name].append(file_name)
+            
+            try:
+                logger.info(f"Iniciando transferência: {file_name} -> {destination}")
+                
+                # Download do arquivo
+                logger.info(f"Baixando arquivo {file_name} da pasta ENTRADA...")
+                file_content = await download_file(token, site_url, PATHS["ENTRADA"], file_name)
+                if not file_content:
+                    logger.error(f"✗ ERRO: Falha ao baixar arquivo {file_name}")
+                    continue
+                logger.info(f"Download concluído com sucesso ({len(file_content)} bytes)")
+                
+                # Upload para a pasta destino
+                logger.info(f"Enviando para pasta {destination_name}...")
+                success = await upload_file(token, site_url, file_content, file_name, destination)
+                
+                if not success:
+                    logger.error(f"✗ ERRO: Falha ao fazer upload do arquivo {file_name} para {destination}")
+                    continue
+                logger.info(f"Upload concluído com sucesso")
+                
+                # Excluir arquivo original após o upload bem-sucedido
+                logger.info(f"Excluindo arquivo original da pasta ENTRADA (apenas este arquivo)...")
+                delete_success = await delete_file(token, site_url, PATHS["ENTRADA"], file_name)
+                
+                if not delete_success:
+                    logger.warning(f"⚠ ATENÇÃO: Falha ao excluir arquivo original {file_name}, mas ele foi copiado para o destino")
+                else:
+                    logger.info(f"Arquivo original excluído com sucesso da pasta ENTRADA")
+                
+                # Adicionar à lista de arquivos movidos
+                moved_files.append({
+                    "file": file_name,
+                    "destination": destination,
+                    "destination_name": destination_name
+                })
+                
+                logger.info(f"✓ SUCESSO! Arquivo {file_name} movido para {destination_name}")
+            
+            except Exception as e:
+                logger.error(f"✗ ERRO AO PROCESSAR ARQUIVO {file_name}: {str(e)}")
+                logger.exception("Detalhes do erro:")
+        
+        # Calcular estatísticas
+        total_time = round(time.time() - start_time, 2)
+        total_moved = len(moved_files)
+        
+        # Arquivos movidos por pasta
+        moved_to_qpe = len(files_by_destination["QPE"])
+        moved_to_nfserv = len(files_by_destination["NFSERV"])
+        moved_to_spb = len(files_by_destination["SPB"])
+        moved_to_r189 = len(files_by_destination["R189"])
+        not_moved = len(files_by_destination["sem_destino"])
+        
+        logger.info("")
+        logger.info("==================== RESUMO DA OPERAÇÃO ====================")
+        logger.info(f"Total de arquivos encontrados na ENTRADA: {len(entrada_files)}")
+        logger.info(f"Total de arquivos movidos: {total_moved}")
+        logger.info(f"Arquivos não movidos: {not_moved}")
+        logger.info(f"Tempo total de execução: {total_time} segundos")
+        logger.info("")
+        logger.info(f"ARQUIVOS MOVIDOS POR PASTA:")
+        logger.info(f"  • QPE: {moved_to_qpe} arquivos")
+        logger.info(f"  • NFSERV: {moved_to_nfserv} arquivos")
+        logger.info(f"  • SPB: {moved_to_spb} arquivos")
+        logger.info(f"  • R189: {moved_to_r189} arquivos")
+        
+        if not_moved > 0:
+            logger.warning("")
+            logger.warning(f"⚠ ATENÇÃO: {not_moved} arquivos não foram identificados:")
+            for i, file in enumerate(files_by_destination["sem_destino"]):
+                logger.warning(f"  {i+1}. {file}")
+        
+        logger.info("")
+        logger.info("==================== FIM DA EXECUÇÃO ====================")
+        
+        # Retornar resultado detalhado
+        return {
+            "success": True,
+            "message": f"{total_moved} arquivos movidos com sucesso em {total_time}s",
+            "limpeza": {
+                "qpe": f"Excluídos {cleanup_results['QPE']['deleted']} de {cleanup_results['QPE']['total_files']} arquivos",
+                "nfserv": f"Excluídos {cleanup_results['NFSERV']['deleted']} de {cleanup_results['NFSERV']['total_files']} arquivos", 
+                "spb": f"Excluídos {cleanup_results['SPB']['deleted']} de {cleanup_results['SPB']['total_files']} arquivos",
+                "r189": f"Excluídos {cleanup_results['R189']['deleted']} de {cleanup_results['R189']['total_files']} arquivos"
+            },
+            "detalhes": {
+                "para_qpe": {
+                    "total": moved_to_qpe,
+                    "pasta": PATHS["QPE"],
+                    "arquivos": files_by_destination["QPE"]
+                },
+                "para_nfserv": {
+                    "total": moved_to_nfserv,
+                    "pasta": PATHS["NFSERV"],
+                    "arquivos": files_by_destination["NFSERV"]
+                },
+                "para_spb": {
+                    "total": moved_to_spb,
+                    "pasta": PATHS["SPB"],
+                    "arquivos": files_by_destination["SPB"]
+                },
+                "para_r189": {
+                    "total": moved_to_r189,
+                    "pasta": PATHS["R189"],
+                    "arquivos": files_by_destination["R189"]
+                }
+            },
+            "estatisticas": {
+                "total_analisado": len(entrada_files),
+                "total_movidos": total_moved,
+                "tempo_total": total_time,
+                "arquivos_nao_movidos": not_moved,
+                "arquivos_sem_destino": files_by_destination["sem_destino"]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"✗ ERRO GERAL AO MOVER ARQUIVOS: {str(e)}")
+        logger.exception("Detalhes do erro:")
+        return {"success": False, "message": f"Erro: {str(e)}"}
+
+@router.post("/process-complete")
+async def process_complete():
+    """
+    Executa o processo completo: renomeia e move os arquivos,
+    em duas etapas sequenciais.
+    """
+    try:
+        logger.info("=== INICIANDO PROCESSO COMPLETO (RENOMEAR E MOVER) ===")
+        
+        # ETAPA 1: Renomear arquivos
+        logger.info("ETAPA 1: Renomeando arquivos...")
+        rename_result = await rename_files()
+        
+        if not rename_result.get("success", False):
+            logger.error(f"Falha na etapa de renomeação: {rename_result.get('message')}")
+            return {
+                "success": False,
+                "message": f"Falha na etapa de renomeação: {rename_result.get('message')}",
+                "etapa_1": rename_result
+            }
+        
+        # Aguardar um momento para garantir que todas as operações SharePoint foram concluídas
+        logger.info("Aguardando conclusão das operações de renomeação...")
+        await asyncio.sleep(2)
+        
+        # ETAPA 2: Mover arquivos
+        logger.info("ETAPA 2: Movendo arquivos...")
+        move_result = await move_files_to_destinations()
+        
+        # Retornar resultados combinados
+        return {
+            "success": True,
+            "message": "Processo completo executado com sucesso",
+            "etapa_1_renomeacao": rename_result,
+            "etapa_2_movimentacao": move_result
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro no processo completo: {str(e)}")
+        logger.exception("Detalhes do erro:")
+        return {"success": False, "message": f"Erro: {str(e)}"}
