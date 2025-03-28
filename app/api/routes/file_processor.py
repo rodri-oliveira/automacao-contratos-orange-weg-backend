@@ -12,6 +12,7 @@ import time
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from threading import Lock
 
 from app.core.auth import SharePointAuth
 
@@ -30,6 +31,11 @@ PATHS = {
 # Cache para conteúdos de arquivo
 _file_content_cache = {}
 _text_cache = {}
+
+# Variáveis para controle de processos
+process_running = False
+process_cancel_requested = False
+process_lock = Lock()
 
 @router.post("/process")
 async def process_entrada_files():
@@ -483,11 +489,17 @@ async def rename_qpe_fatura_files():
 @router.post("/rename-all-patterns")
 async def rename_all_patterns():
     """
-    Renomeia arquivos usando as regras de negócio corretas,
-    mantendo o nome original e apenas concatenando prefixos.
+    Renomeia arquivos com base em todos os padrões definidos.
     """
+    global process_running, process_cancel_requested
+    
+    # Reseta a flag de cancelamento e marca o processo como em execução
+    with process_lock:
+        process_cancel_requested = False
+        process_running = True
+    
     try:
-        logger.info("=== INICIANDO RENOMEAÇÃO DE ARQUIVOS (TODAS AS REGRAS) ===")
+        logger.info("Iniciando processo de renomeação de arquivos...")
         
         # Autenticar no SharePoint
         auth = SharePointAuth()
@@ -509,8 +521,17 @@ async def rename_all_patterns():
         # Arquivos renomeados
         renamed_files = []
         
-        # Processar cada arquivo
-        for file in entrada_files:
+        # A cada loop ou operação significativa, verifique cancelamento
+        for i, file in enumerate(entrada_files):
+            if check_if_cancelled():
+                logger.warning("PROCESSO CANCELADO PELO USUÁRIO!")
+                return {
+                    "success": False,
+                    "message": "Processo cancelado pelo usuário",
+                    "cancelled": True,
+                    "processed": i
+                }
+            
             original_name = file.get("Name", "")
             new_name = None
             
@@ -580,6 +601,16 @@ async def rename_all_patterns():
             
             except Exception as e:
                 logger.error(f"Erro ao processar arquivo {original_name}: {str(e)}")
+            
+            # Verificar cancelamento novamente após operações demoradas
+            if check_if_cancelled():
+                logger.warning("PROCESSO CANCELADO PELO USUÁRIO DURANTE PROCESSAMENTO!")
+                return {
+                    "success": False, 
+                    "message": "Processo cancelado pelo usuário",
+                    "cancelled": True,
+                    "processed": i
+                }
         
         # Retornar resultado
         success_count = len(renamed_files)
@@ -588,10 +619,15 @@ async def rename_all_patterns():
             "message": f"{success_count} arquivos renomeados com sucesso",
             "renamed_files": renamed_files
         }
-        
+    
     except Exception as e:
-        logger.error(f"Erro ao renomear arquivos: {str(e)}")
+        logger.error(f"Erro: {str(e)}")
         return {"success": False, "message": f"Erro: {str(e)}"}
+    
+    finally:
+        # Marca o processo como concluído, independente de sucesso ou erro
+        with process_lock:
+            process_running = False
 
 @router.post("/rename")
 async def rename_files():
@@ -1811,12 +1847,16 @@ async def move_files_to_destinations(token, site_url, files_list):
 @router.post("/move-files")
 async def move_files_to_destinations():
     """
-    Move arquivos da pasta ENTRADA para suas respectivas pastas de destino.
-    IMPORTANTE: 
-    - Os arquivos são mantidos na pasta ENTRADA após o envio
-    - A pasta R189 NÃO é limpa, apenas QPE, NFSERV e SPB
+    Move arquivos para suas pastas de destino.
+    Agora com suporte para cancelamento.
     """
-    start_time = time.time()
+    global process_running, process_cancel_requested
+    
+    # Reseta a flag de cancelamento e marca o processo como em execução
+    with process_lock:
+        process_cancel_requested = False
+        process_running = True
+    
     try:
         logger.info("==================== INICIANDO MOVIMENTAÇÃO DE ARQUIVOS ====================")
         logger.info(f"Data/hora de início: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
@@ -2094,6 +2134,11 @@ async def move_files_to_destinations():
         logger.error(f"✗ ERRO GERAL AO MOVER ARQUIVOS: {str(e)}")
         logger.exception("Detalhes do erro:")
         return {"success": False, "message": f"Erro: {str(e)}"}
+    
+    finally:
+        # Marca o processo como concluído, independente de sucesso ou erro
+        with process_lock:
+            process_running = False
 
 @router.post("/process-complete")
 async def process_complete():
@@ -2208,3 +2253,62 @@ async def reset_process():
         logger.error(f"Erro geral ao resetar processo: {str(e)}")
         logger.exception("Detalhes do erro:")
         return {"success": False, "message": f"Erro: {str(e)}"}
+
+@router.post("/cancel-process")
+async def cancel_process():
+    """
+    Cancela processos em andamento de forma imediata.
+    """
+    global process_cancel_requested, process_running
+    
+    try:
+        logger.info("===== SOLICITAÇÃO DE CANCELAMENTO RECEBIDA =====")
+        
+        # Marcar flag para cancelamento
+        with process_lock:
+            process_cancel_requested = True
+            was_running = process_running
+            process_running = False  # Força a marcação do processo como encerrado
+        
+        if was_running:
+            logger.info("Processo interrompido forçadamente")
+            # Limpar cache para evitar problemas em execuções futuras
+            clear_sharepoint_cache()
+            return {
+                "success": True,
+                "message": "Processo cancelado com sucesso."
+            }
+        else:
+            logger.info("Nenhum processo em execução para cancelar")
+            return {
+                "success": True,
+                "message": "Nenhum processo em execução para cancelar."
+            }
+    except Exception as e:
+        logger.error(f"Erro ao cancelar processo: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Erro ao cancelar processo: {str(e)}"
+        }
+
+@router.get("/process-status")
+async def get_process_status():
+    """
+    Retorna o status atual do processo (em execução ou não).
+    """
+    global process_running, process_cancel_requested
+    
+    with process_lock:
+        status = {
+            "running": process_running,
+            "cancel_requested": process_cancel_requested
+        }
+    
+    return status
+
+# Adicione esta função auxiliar para verificar cancelamento
+def check_if_cancelled():
+    """Verifica se o cancelamento foi solicitado."""
+    global process_cancel_requested
+    with process_lock:
+        return process_cancel_requested
