@@ -70,35 +70,162 @@ class DivergenceReportNFSERVR189:
             nfserv_data['SIGLA'] = nfserv_data['NFSERV_ID'].apply(extract_sigla)
             r189_data['SIGLA'] = r189_data['Invoice number'].apply(extract_sigla)
             
-            # Obtém siglas únicas (excluindo SPB e valores nulos)
-            siglas_unicas = set(nfserv_data['SIGLA'].unique()) - {'SPB', None}
-            logger.info(f"Siglas únicas encontradas: {siglas_unicas}")
+            # Verificação para Invoice Type
+            if 'Invoice Type' not in r189_data.columns:
+                logger.warning("Coluna 'Invoice Type' não encontrada no R189. Esta coluna é necessária para comparação correta.")
+                r189_data['Invoice Type'] = None  # Adiciona coluna vazia para evitar erros
             
-            # Verifica se as colunas necessárias existem
-            nfserv_required = ['NFSERV_ID', 'CNPJ', 'VALOR_TOTAL']
-            r189_required = ['Invoice number', 'CNPJ - WEG', coluna_total_encontrada]
+            # CORREÇÃO IMPORTANTE: Dividir os QPE e SPB do R189 em grupos baseados no Invoice Type
+            logger.info("Separando os QPEs e SPBs do R189 em grupos baseados no Invoice Type")
             
-            missing_nfserv = [col for col in nfserv_required if col not in nfserv_data.columns]
-            if missing_nfserv:
-                logger.error(f"Colunas necessárias não encontradas no NFSERV: {missing_nfserv}")
-                return False, f"Erro: Colunas necessárias não encontradas no NFSERV: {', '.join(missing_nfserv)}", pd.DataFrame()
-                
-            missing_r189 = [col for col in r189_required if col not in r189_data.columns]
-            if missing_r189:
-                logger.error(f"Colunas necessárias não encontradas no R189: {missing_r189}")
-                return False, f"Erro: Colunas necessárias não encontradas no R189: {', '.join(missing_r189)}", pd.DataFrame()
+            # Criar máscaras para identificar cada tipo de registro
+            qpe_ren_mask = (r189_data['SIGLA'] == 'QPE') & (r189_data['Invoice Type'] == 'REN')
+            qpe_srv_mask = (r189_data['SIGLA'] == 'QPE') & (r189_data['Invoice Type'] == 'SRV')
+            spb_srv_mask = (r189_data['SIGLA'] == 'SPB') & (r189_data['Invoice Type'] == 'SRV')
+            spb_outros_mask = (r189_data['SIGLA'] == 'SPB') & (r189_data['Invoice Type'] != 'SRV')
             
-            # Validação de tipos de dados
-            try:
-                logger.info("Convertendo colunas de valor para numérico")
-                nfserv_data['VALOR_TOTAL'] = pd.to_numeric(nfserv_data['VALOR_TOTAL'], errors='coerce')
-                r189_data[coluna_total_encontrada] = pd.to_numeric(r189_data[coluna_total_encontrada], errors='coerce')
-            except Exception as e:
-                logger.error(f"Erro ao converter valores: {str(e)}")
-                return False, f"Erro: Valores inválidos nas colunas de valor: {str(e)}", pd.DataFrame()
+            # Log para debug
+            qpe_ren_count = qpe_ren_mask.sum()
+            qpe_srv_count = qpe_srv_mask.sum()
+            spb_srv_count = spb_srv_mask.sum()
+            spb_outros_count = spb_outros_mask.sum()
             
-            # Para cada sigla, verifica as contagens e divergências
-            for sigla in siglas_unicas:
+            logger.info(f"Encontrados {qpe_ren_count} registros QPE+REN e {qpe_srv_count} registros QPE+SRV no R189")
+            logger.info(f"Encontrados {spb_srv_count} registros SPB+SRV e {spb_outros_count} registros SPB+outros no R189")
+            
+            # Verificar os registros QPE no NFSERV
+            qpe_nfserv_mask = (nfserv_data['SIGLA'] == 'QPE')
+            qpe_nfserv_count = qpe_nfserv_mask.sum()
+            logger.info(f"Encontrados {qpe_nfserv_count} registros QPE no NFSERV")
+            
+            # Verificar os registros SPB no NFSERV
+            spb_nfserv_mask = (nfserv_data['SIGLA'] == 'SPB')
+            spb_nfserv_count = spb_nfserv_mask.sum()
+            logger.info(f"Encontrados {spb_nfserv_count} registros SPB no NFSERV")
+            
+            # Obtém listas de IDs para cada categoria
+            qpe_ren_ids = set(r189_data.loc[qpe_ren_mask, 'Invoice number'])
+            qpe_srv_ids = set(r189_data.loc[qpe_srv_mask, 'Invoice number'])
+            spb_srv_ids = set(r189_data.loc[spb_srv_mask, 'Invoice number'])
+            spb_outros_ids = set(r189_data.loc[spb_outros_mask, 'Invoice number'])
+            qpe_nfserv_ids = set(nfserv_data.loc[qpe_nfserv_mask, 'NFSERV_ID'])
+            spb_nfserv_ids = set(nfserv_data.loc[spb_nfserv_mask, 'NFSERV_ID'])
+            
+            logger.info(f"IDs de QPE+REN no R189: {len(qpe_ren_ids)} itens")
+            logger.info(f"IDs de QPE+SRV no R189: {len(qpe_srv_ids)} itens")
+            logger.info(f"IDs de SPB+SRV no R189: {len(spb_srv_ids)} itens")
+            logger.info(f"IDs de SPB+outros no R189: {len(spb_outros_ids)} itens")
+            logger.info(f"IDs de QPE no NFSERV: {len(qpe_nfserv_ids)} itens")
+            logger.info(f"IDs de SPB no NFSERV: {len(spb_nfserv_ids)} itens")
+            
+            # VERIFICAÇÃO 1: QPE+REN do R189 vs QPE do NFSERV
+            # Estes são os QPEs que devem estar no NFSERV
+            logger.info("Verificando QPE+REN do R189 vs QPE do NFSERV")
+            
+            # Adicione a contagem nas estatísticas
+            divergences.append({
+                'Tipo': 'CONTAGEM_QPE_REN',
+                'NFSERV_ID': 'N/A',
+                'CNPJ NFSERV': 'N/A',
+                'CNPJ R189': 'N/A',
+                'Valor NFSERV': qpe_nfserv_count,
+                'Valor R189': qpe_ren_count,
+                'Detalhes': f'QPEs com Type=REN: NFSERV={qpe_nfserv_count}, R189={qpe_ren_count}'
+            })
+            
+            # VERIFICAÇÃO 2: SPB+outros (não SRV) do R189 vs SPB do NFSERV
+            # Apenas os SPBs que NÃO são SRV devem estar no NFSERV
+            logger.info("Verificando SPB+outros (não SRV) do R189 vs SPB do NFSERV")
+            
+            divergences.append({
+                'Tipo': 'CONTAGEM_SPB_TEL',
+                'NFSERV_ID': 'N/A',
+                'CNPJ NFSERV': 'N/A',
+                'CNPJ R189': 'N/A',
+                'Valor NFSERV': spb_nfserv_count,
+                'Valor R189': spb_outros_count,
+                'Detalhes': f'SPBs sem Type=SRV: NFSERV={spb_nfserv_count}, R189={spb_outros_count}'
+            })
+            
+            # Verificar divergências item a item para QPE+REN
+            qpe_ren_missing = qpe_ren_ids - qpe_nfserv_ids
+            if qpe_ren_missing:
+                logger.warning(f"Encontrados {len(qpe_ren_missing)} QPE+REN no R189 que estão ausentes no NFSERV")
+                for missing_id in qpe_ren_missing:
+                    row = r189_data[r189_data['Invoice number'] == missing_id].iloc[0]
+                    divergences.append({
+                        'Tipo': 'QPE_REN ausente no NFSERV',
+                        'NFSERV_ID': missing_id,
+                        'CNPJ NFSERV': 'N/A',
+                        'CNPJ R189': row['CNPJ - WEG'],
+                        'Valor NFSERV': 'N/A',
+                        'Valor R189': row[coluna_total_encontrada],
+                        'Detalhes': f'Invoice Type=REN não encontrado no NFSERV'
+                    })
+            
+            qpe_nfserv_missing = qpe_nfserv_ids - qpe_ren_ids
+            if qpe_nfserv_missing:
+                logger.warning(f"Encontrados {len(qpe_nfserv_missing)} QPE no NFSERV que não são QPE+REN no R189")
+                for missing_id in qpe_nfserv_missing:
+                    # Verificar se existe como outro tipo (ex: QPE+SRV)
+                    if missing_id in qpe_srv_ids:
+                        logger.info(f"ID {missing_id} encontrado como QPE+SRV no R189, não é divergência real")
+                        continue
+                    
+                    row = nfserv_data[nfserv_data['NFSERV_ID'] == missing_id].iloc[0]
+                    divergences.append({
+                        'Tipo': 'QPE do NFSERV ausente como REN no R189',
+                        'NFSERV_ID': missing_id,
+                        'CNPJ NFSERV': row['CNPJ'],
+                        'CNPJ R189': 'N/A',
+                        'Valor NFSERV': row['VALOR_TOTAL'],
+                        'Valor R189': 'N/A',
+                        'Detalhes': f'QPE existe no NFSERV mas não como Type=REN no R189'
+                    })
+            
+            # Verificar divergências item a item para SPB+outros (não SRV)
+            spb_outros_missing = spb_outros_ids - spb_nfserv_ids
+            if spb_outros_missing:
+                logger.warning(f"Encontrados {len(spb_outros_missing)} SPB sem Type=SRV no R189 que estão ausentes no NFSERV")
+                for missing_id in spb_outros_missing:
+                    row = r189_data[r189_data['Invoice number'] == missing_id].iloc[0]
+                    divergences.append({
+                        'Tipo': 'SPB_TEL ausente no NFSERV',
+                        'NFSERV_ID': missing_id,
+                        'CNPJ NFSERV': 'N/A',
+                        'CNPJ R189': row['CNPJ - WEG'],
+                        'Valor NFSERV': 'N/A',
+                        'Valor R189': row[coluna_total_encontrada],
+                        'Detalhes': f'SPB sem Type=SRV não encontrado no NFSERV'
+                    })
+            
+            spb_nfserv_missing = spb_nfserv_ids - spb_outros_ids
+            if spb_nfserv_missing:
+                logger.warning(f"Encontrados {len(spb_nfserv_missing)} SPB no NFSERV que não estão no R189 ou são SPB+SRV")
+                for missing_id in spb_nfserv_missing:
+                    # Verificar se existe como outro tipo (ex: SPB+SRV)
+                    if missing_id in spb_srv_ids:
+                        logger.info(f"ID {missing_id} encontrado como SPB+SRV no R189, não é divergência real")
+                        continue
+                    
+                    row = nfserv_data[nfserv_data['NFSERV_ID'] == missing_id].iloc[0]
+                    divergences.append({
+                        'Tipo': 'SPB_TEL do NFSERV ausente ou como SRV no R189',
+                        'NFSERV_ID': missing_id,
+                        'CNPJ NFSERV': row['CNPJ'],
+                        'CNPJ R189': 'N/A',
+                        'Valor NFSERV': row['VALOR_TOTAL'],
+                        'Valor R189': 'N/A',
+                        'Detalhes': f'SPB existe no NFSERV mas não está ou é Type=SRV no R189'
+                    })
+            
+            # Agora proceda com a verificação normal para outras siglas (excluindo QPE e SPB)
+            # Obtém siglas únicas (excluindo QPE e SPB que já tratamos separadamente, e valores nulos)
+            siglas_sem_qpe_spb = set(nfserv_data['SIGLA'].unique()) - {'QPE', 'SPB', None}
+            logger.info(f"Siglas únicas para verificação padrão: {siglas_sem_qpe_spb}")
+            
+            # Verificar cada uma das outras siglas
+            for sigla in siglas_sem_qpe_spb:
                 logger.info(f"Analisando sigla: {sigla}")
                 
                 # Contagem no NFSERV
@@ -106,7 +233,7 @@ class DivergenceReportNFSERVR189:
                 
                 # Contagem no R189
                 r189_count = len(r189_data[r189_data['SIGLA'] == sigla])
-                
+                    
                 logger.info(f"Contagem para sigla {sigla}: NFSERV={nfserv_count}, R189={r189_count}")
                 
                 # Adiciona contagem para todas as siglas
