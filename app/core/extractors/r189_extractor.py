@@ -70,6 +70,7 @@ class R189Extractor:
                     'cnpj_fornecedor': str(row['CNPJ - WEG']),
                     'nota_fiscal': str(row['Invoice number']),
                     'site_name': str(row['Site Name - WEG 2']),
+                    'invoice_type': str(row['Invoice Type']),
                     'valor_total': float(row.iloc[3]) if pd.notna(row.iloc[3]) else 0.0,
                 })
             
@@ -112,13 +113,14 @@ class R189Extractor:
             # Combina todas as abas em um único DataFrame
             df_consolidado = df_brasil.copy()
 
-            # Seleciona apenas as colunas necessárias
+            # Seleciona apenas as colunas necessárias, ADICIONANDO "Invoice Type"
             colunas_necessarias = [
                 'CNPJ - WEG',
                 'Invoice number',
                 'Site Name - WEG 2',
                 'Total Geral',
-                'Account number'
+                'Account number',
+                'Invoice Type'  # Adicionamos a nova coluna aqui
             ]
             
             # Verifica se todas as colunas necessárias existem
@@ -135,8 +137,8 @@ class R189Extractor:
             # Aplica o ffill apenas nas linhas onde Account number NÃO contém 'Total'
             df_resultado.loc[linhas_sem_total, 'Invoice number'] = df_resultado.loc[linhas_sem_total, 'Invoice number'].ffill()
             
-            # Preenche outros valores vazios
-            df_resultado[['CNPJ - WEG', 'Site Name - WEG 2']] = df_resultado[['CNPJ - WEG', 'Site Name - WEG 2']].ffill()
+            # Preenche outros valores vazios, INCLUINDO "Invoice Type"
+            df_resultado[['CNPJ - WEG', 'Site Name - WEG 2', 'Invoice Type']] = df_resultado[['CNPJ - WEG', 'Site Name - WEG 2', 'Invoice Type']].ffill()
             
             # Remove linhas que ainda possuem valores NaN nas colunas principais
             df_resultado = df_resultado.dropna(subset=['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2', 'Total Geral'])
@@ -145,7 +147,8 @@ class R189Extractor:
             df_resultado = df_resultado.drop('Account number', axis=1)
 
             # Agrupa por todas as colunas exceto 'Total Geral' e soma os valores
-            df_resultado = df_resultado.groupby(['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2'], as_index=False)['Total Geral'].sum()
+            # INCLUI "Invoice Type" no agrupamento
+            df_resultado = df_resultado.groupby(['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2', 'Invoice Type'], as_index=False)['Total Geral'].sum()
 
             # Gera o arquivo consolidado em formato BytesIO
             arquivo_consolidado = BytesIO()
@@ -243,13 +246,13 @@ class R189Extractor:
     def _process_dataframe(self, df: pd.DataFrame, total_column: str) -> pd.DataFrame:
         # Processamento do DataFrame
         df['Invoice number'] = df['Invoice number'].ffill()
-        df[['CNPJ - WEG', 'Site Name - WEG 2']] = df[['CNPJ - WEG', 'Site Name - WEG 2']].ffill()
+        df[['CNPJ - WEG', 'Site Name - WEG 2', 'Invoice Type']] = df[['CNPJ - WEG', 'Site Name - WEG 2', 'Invoice Type']].ffill()
         
         # Remover linhas com valores ausentes
         df = df.dropna(subset=['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2', total_column])
         
-        # Agrupar e somar
+        # Agrupar e somar (incluindo "Invoice Type" no agrupamento)
         return df.groupby(
-            ['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2'],
+            ['CNPJ - WEG', 'Invoice number', 'Site Name - WEG 2', 'Invoice Type'],
             as_index=False
         )[total_column].sum()
