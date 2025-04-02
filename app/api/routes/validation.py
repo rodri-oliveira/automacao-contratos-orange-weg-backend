@@ -136,3 +136,26 @@ async def consolidate_reports():
             "error": f"Erro ao consolidar relatórios: {str(e)}",
             "show_popup": True
         }
+
+@router.post("/mun_code_r189_simple")
+async def validate_mun_code_r189_simple():
+    """
+    Executa a validação entre MUN_CODE e R189 (versão simplificada sem coluna NF)
+    """
+    try:
+        logger.info("=== INICIANDO VALIDAÇÃO MUN_CODE vs R189 (SIMPLES) ===")
+        from app.core.reports.report_mun_code_r189_simple import ReportMunCodeR189Simple
+        validator = ReportMunCodeR189Simple()
+        
+        result = await validator.generate_report()
+        logger.info(f"Resultado da validação simplificada: {result}")
+        
+        return result
+    except Exception as e:
+        logger.error(f"Erro na validação MUN_CODE vs R189 (Simples): {str(e)}")
+        logger.error(traceback.format_exc())
+        return {
+            "success": False,
+            "error": f"Erro na validação: {str(e)}",
+            "show_popup": True
+        }
