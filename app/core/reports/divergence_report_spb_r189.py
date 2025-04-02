@@ -65,6 +65,11 @@ class DivergenceReportSPBR189:
                 logger.error(f"Colunas necessárias não encontradas no R189: {missing_r189}")
                 return False, f"Erro: Colunas necessárias não encontradas no R189: {', '.join(missing_r189)}", pd.DataFrame()
             
+            # Verificação para Invoice Type
+            if 'Invoice Type' not in r189_data.columns:
+                logger.warning("Coluna 'Invoice Type' não encontrada no R189. Esta coluna é necessária para comparação correta.")
+                r189_data['Invoice Type'] = None  # Adiciona coluna vazia para evitar erros
+            
             # Validação de tipos de dados
             try:
                 logger.info("Convertendo colunas de valor para numérico")
@@ -77,131 +82,119 @@ class DivergenceReportSPBR189:
             
             divergences = []
             
+            # NOVA LÓGICA: Filtrar apenas SPBs com Type=SRV no R189
+            logger.info("Filtrando SPBs com Type=SRV no R189")
+            
+            # Filtrar SPBs no R189 com base no Invoice Type
+            spb_srv_mask = (r189_data['Invoice number'].str.contains('SPB', na=False)) & (r189_data['Invoice Type'] == 'SRV')
+            
+            # Obter conjunto de IDs para SPBs com SRV
+            r189_spb_srv_ids = set(r189_data[spb_srv_mask]['Invoice number'].unique())
+            
+            # Contar SPBs com SRV
+            qtd_spb_srv = len(r189_spb_srv_ids)
+            
+            logger.info(f"SPBs no R189 com Type=SRV: {qtd_spb_srv}")
+            
             # Contagem de SPB_ID do SPB_consolidado
             spb_ids = set(spb_data['SPB_ID'].unique())
             qtd_spb = len(spb_ids)
             
-            # Contagem de SPB no NFSERV (procurando SPB no NFSERV_ID)
-            nfserv_spb_ids = set(nfserv_data[nfserv_data['NFSERV_ID'].str.contains('SPB', na=False)]['NFSERV_ID'].unique())
-            qtd_nfserv_spb = len(nfserv_spb_ids)
+            logger.info(f"SPBs no consolidado SPB: {qtd_spb}")
             
-            # Contagem de SPB no R189
-            r189_spb_ids = set(r189_data[r189_data['Invoice number'].str.contains('SPB', na=False)]['Invoice number'].unique())
-            qtd_r189_spb = len(r189_spb_ids)
+            # Adiciona informação de contagem SPB com SRV (para SPB consolidado)
+            divergences.append({
+                'Tipo': 'CONTAGEM_SPB_SRV',
+                'SPB_ID': 'N/A',
+                'CNPJ SPB': 'N/A',
+                'CNPJ R189': 'N/A',
+                'Valor SPB': qtd_spb,
+                'Valor R189': qtd_spb_srv,
+                'Detalhes': f'SPB consolidado: {qtd_spb}, R189 com Type=SRV: {qtd_spb_srv}'
+            })
             
-            logger.info(f"Contagem - SPB: {qtd_spb}, NFSERV SPB: {qtd_nfserv_spb}, R189 SPB: {qtd_r189_spb}")
+            # SPBs com Type=SRV que estão no R189 mas não no SPB consolidado
+            spb_srv_missing = r189_spb_srv_ids - spb_ids
+            if spb_srv_missing:
+                logger.warning(f"Encontrados {len(spb_srv_missing)} SPBs com Type=SRV no R189 que estão ausentes no SPB consolidado")
+                for spb_id in spb_srv_missing:
+                    r189_row = r189_data[r189_data['Invoice number'] == spb_id].iloc[0]
+                    divergences.append({
+                        'Tipo': 'ID encontrado apenas no R189',
+                        'SPB_ID': spb_id,
+                        'CNPJ SPB': 'N/A',
+                        'CNPJ R189': r189_row['CNPJ - WEG'],
+                        'Valor SPB': 'N/A',
+                        'Valor R189': r189_row[coluna_total_encontrada],
+                        'Detalhes': f'SPB com Type=SRV não encontrado no SPB consolidado'
+                    })
             
-            # Adiciona informação de quantidade ao início do relatório
-            if (qtd_spb + qtd_nfserv_spb) != qtd_r189_spb:
-                logger.warning(f"Divergência na contagem de SPB: SPB+NFSERV={qtd_spb + qtd_nfserv_spb}, R189={qtd_r189_spb}")
-                divergences.append({
-                    'Tipo': 'CONTAGEM_SPB',
-                    'SPB_ID': 'N/A',
-                    'CNPJ SPB': 'N/A',
-                    'CNPJ R189': 'N/A',
-                    'Valor SPB': qtd_spb + qtd_nfserv_spb,
-                    'Valor R189': qtd_r189_spb,
-                    'Detalhes': f'SPB: {qtd_spb}, NFSERV: {qtd_nfserv_spb}, R189: {qtd_r189_spb}'
-                })
+            # SPBs que estão no SPB consolidado mas não como Type=SRV no R189
+            spb_missing_srv = spb_ids - r189_spb_srv_ids
+            if spb_missing_srv:
+                logger.warning(f"Encontrados {len(spb_missing_srv)} SPBs no consolidado SPB que não são Type=SRV no R189")
+                for spb_id in spb_missing_srv:
+                    # Verificar se existe no R189 com outro tipo
+                    r189_row = r189_data[r189_data['Invoice number'] == spb_id]
+                    if not r189_row.empty:
+                        invoice_type = r189_row.iloc[0]['Invoice Type']
+                        logger.warning(f"SPB {spb_id} encontrado no R189 com Type={invoice_type}, deveria ser SRV")
+                        divergences.append({
+                            'Tipo': 'SPB no consolidado com tipo incorreto no R189',
+                            'SPB_ID': spb_id,
+                            'CNPJ SPB': spb_data[spb_data['SPB_ID'] == spb_id].iloc[0]['CNPJ'],
+                            'CNPJ R189': r189_row.iloc[0]['CNPJ - WEG'],
+                            'Valor SPB': spb_data[spb_data['SPB_ID'] == spb_id].iloc[0]['VALOR_TOTAL'],
+                            'Valor R189': r189_row.iloc[0][coluna_total_encontrada],
+                            'Detalhes': f'SPB existe no R189 com Type={invoice_type}, deveria ser SRV'
+                        })
+                    else:
+                        # Não existe no R189
+                        spb_row = spb_data[spb_data['SPB_ID'] == spb_id].iloc[0]
+                        divergences.append({
+                            'Tipo': 'ID do SPB não encontrado no R189',
+                            'SPB_ID': spb_id,
+                            'CNPJ SPB': spb_row['CNPJ'],
+                            'CNPJ R189': 'N/A',
+                            'Valor SPB': spb_row['VALOR_TOTAL'],
+                            'Valor R189': 'N/A',
+                            'Detalhes': 'SPB do consolidado não encontrado no R189'
+                        })
             
-            # IDs que estão no R189 mas não em nenhum dos consolidados
-            ids_r189_nao_encontrados = r189_spb_ids - (spb_ids.union(nfserv_spb_ids))
-            logger.info(f"IDs encontrados apenas no R189: {len(ids_r189_nao_encontrados)}")
+            # Verificar divergências de CNPJ e valor para SPBs com Type=SRV que existem em ambos
+            spb_srv_em_ambos = r189_spb_srv_ids.intersection(spb_ids)
+            logger.info(f"SPBs com Type=SRV presentes tanto no R189 quanto no SPB consolidado: {len(spb_srv_em_ambos)}")
             
-            for spb_id in ids_r189_nao_encontrados:
+            for spb_id in spb_srv_em_ambos:
                 r189_row = r189_data[r189_data['Invoice number'] == spb_id].iloc[0]
-                divergences.append({
-                    'Tipo': 'ID encontrado apenas no R189',
-                    'SPB_ID': spb_id,
-                    'CNPJ SPB': 'N/A',
-                    'CNPJ R189': r189_row['CNPJ - WEG'],
-                    'Valor SPB': 'N/A',
-                    'Valor R189': r189_row[coluna_total_encontrada]
-                })
-            
-            # IDs que estão nos consolidados mas não no R189
-            todos_spb_ids = spb_ids.union(nfserv_spb_ids)
-            ids_faltando_r189 = todos_spb_ids - r189_spb_ids
-            logger.info(f"IDs não encontrados no R189: {len(ids_faltando_r189)}")
-            
-            for spb_id in ids_faltando_r189:
-                # Procura primeiro no SPB_consolidado
-                spb_row = spb_data[spb_data['SPB_ID'] == spb_id]
-                if not spb_row.empty:
-                    row = spb_row.iloc[0]
-                    origem = "SPB"
-                    cnpj = row['CNPJ']
-                    valor = row['VALOR_TOTAL']
-                else:
-                    # Se não encontrou, procura no NFSERV
-                    nfserv_row = nfserv_data[nfserv_data['NFSERV_ID'] == spb_id]
-                    if nfserv_row.empty:
-                        logger.warning(f"ID {spb_id} não encontrado nem no SPB nem no NFSERV")
-                        continue
-                    row = nfserv_row.iloc[0]
-                    origem = "NFSERV"
-                    cnpj = row['CNPJ']
-                    valor = row['VALOR_TOTAL']
-                
-                divergences.append({
-                    'Tipo': f'ID do {origem} não encontrado no R189',
-                    'SPB_ID': spb_id,
-                    'CNPJ SPB': cnpj,
-                    'CNPJ R189': 'N/A',
-                    'Valor SPB': valor,
-                    'Valor R189': 'N/A'
-                })
-            
-            # Verifica divergências de CNPJ e valor para IDs que existem em ambos
-            ids_em_ambos = r189_spb_ids.intersection(todos_spb_ids)
-            logger.info(f"IDs presentes em ambos os sistemas: {len(ids_em_ambos)}")
-            
-            for spb_id in ids_em_ambos:
-                r189_rows = r189_data[r189_data['Invoice number'] == spb_id]
-                if r189_rows.empty:
-                    logger.warning(f"ID {spb_id} não encontrado no R189 (inconsistência)")
-                    continue
-                
-                r189_row = r189_rows.iloc[0]
-                
-                # Procura primeiro no SPB_consolidado
-                spb_row = spb_data[spb_data['SPB_ID'] == spb_id]
-                if not spb_row.empty:
-                    row = spb_row.iloc[0]
-                    origem = "SPB"
-                else:
-                    # Se não encontrou, procura no NFSERV
-                    nfserv_row = nfserv_data[nfserv_data['NFSERV_ID'] == spb_id]
-                    if nfserv_row.empty:
-                        logger.warning(f"ID {spb_id} não encontrado nem no SPB nem no NFSERV (inconsistência)")
-                        continue
-                    row = nfserv_row.iloc[0]
-                    origem = "NFSERV"
+                spb_row = spb_data[spb_data['SPB_ID'] == spb_id].iloc[0]
                 
                 # Verifica CNPJ
-                if row['CNPJ'] != r189_row['CNPJ - WEG']:
-                    logger.warning(f"CNPJ divergente para {spb_id}: {origem}={row['CNPJ']}, R189={r189_row['CNPJ - WEG']}")
+                if spb_row['CNPJ'] != r189_row['CNPJ - WEG']:
+                    logger.warning(f"CNPJ divergente para SPB {spb_id} com Type=SRV: SPB={spb_row['CNPJ']}, R189={r189_row['CNPJ - WEG']}")
                     divergences.append({
                         'Tipo': 'CNPJ divergente',
                         'SPB_ID': spb_id,
-                        'CNPJ SPB': row['CNPJ'],
+                        'CNPJ SPB': spb_row['CNPJ'],
                         'CNPJ R189': r189_row['CNPJ - WEG'],
-                        'Valor SPB': row['VALOR_TOTAL'],
-                        'Valor R189': r189_row[coluna_total_encontrada]
+                        'Valor SPB': spb_row['VALOR_TOTAL'],
+                        'Valor R189': r189_row[coluna_total_encontrada],
+                        'Detalhes': f'CNPJ divergente para SPB {spb_id} com Type=SRV'
                     })
                 
                 # Verifica valor
-                valor_spb = round(float(row['VALOR_TOTAL']), 2)
+                valor_spb = round(float(spb_row['VALOR_TOTAL']), 2)
                 valor_r189 = round(float(r189_row[coluna_total_encontrada]), 2)
                 if abs(valor_spb - valor_r189) > 0.01:  # Tolerância de 1 centavo
-                    logger.warning(f"Valor divergente para {spb_id}: {origem}={valor_spb}, R189={valor_r189}")
+                    logger.warning(f"Valor divergente para SPB {spb_id} com Type=SRV: SPB={valor_spb}, R189={valor_r189}")
                     divergences.append({
                         'Tipo': 'Valor divergente',
                         'SPB_ID': spb_id,
-                        'CNPJ SPB': row['CNPJ'],
+                        'CNPJ SPB': spb_row['CNPJ'],
                         'CNPJ R189': r189_row['CNPJ - WEG'],
-                        'Valor SPB': row['VALOR_TOTAL'],
-                        'Valor R189': r189_row[coluna_total_encontrada]
+                        'Valor SPB': valor_spb,
+                        'Valor R189': valor_r189,
+                        'Detalhes': f'Valor divergente para SPB {spb_id} com Type=SRV'
                     })
             
             if divergences:

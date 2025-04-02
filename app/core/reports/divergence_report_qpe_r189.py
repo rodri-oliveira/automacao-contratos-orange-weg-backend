@@ -59,32 +59,80 @@ class DivergenceReportQPER189:
             
             divergences = []
             
-            # Contagem de QPE_ID
-            logger.info("Contando QPE_IDs únicos")
-            qpe_ids = set(qpe_data['QPE_ID'].str.lower().unique())
-            r189_qpe_ids = set(r189_data[r189_data['Invoice number'].str.lower().str.startswith('qpe-', na=False)]['Invoice number'].str.lower().unique())
+            # Verificação para Invoice Type
+            if 'Invoice Type' not in r189_data.columns:
+                logger.warning("Coluna 'Invoice Type' não encontrada no R189. Esta coluna é necessária para comparação correta.")
+                r189_data['Invoice Type'] = None  # Adiciona coluna vazia para evitar erros
             
-            logger.info(f"QPE IDs únicos: {len(qpe_ids)}, R189 QPE IDs únicos: {len(r189_qpe_ids)}")
+            # NOVA LÓGICA: Separar os QPEs do R189 por tipo
+            # Agora consideramos apenas os QPEs com "Invoice Type" = "SRV" para comparação com o consolidado QPE
+            logger.info("Separando os QPEs do R189 por tipo de Invoice Type")
+            
+            # Filtrar QPEs por Invoice Type
+            qpe_srv_mask = (r189_data['Invoice number'].str.lower().str.startswith('qpe-', na=False)) & (r189_data['Invoice Type'] == 'SRV')
+            qpe_ren_mask = (r189_data['Invoice number'].str.lower().str.startswith('qpe-', na=False)) & (r189_data['Invoice Type'] == 'REN')
+            qpe_outros_mask = (r189_data['Invoice number'].str.lower().str.startswith('qpe-', na=False)) & (~r189_data['Invoice Type'].isin(['SRV', 'REN']))
+            
+            # Contando QPEs por tipo
+            qpe_srv_count = qpe_srv_mask.sum()
+            qpe_ren_count = qpe_ren_mask.sum()
+            qpe_outros_count = qpe_outros_mask.sum()
+            
+            logger.info(f"Encontrados no R189: {qpe_srv_count} QPE+SRV, {qpe_ren_count} QPE+REN, {qpe_outros_count} QPE+outros")
+            
+            # Obtém os IDs dos QPEs com SRV (que devem ser comparados com o consolidado QPE)
+            r189_qpe_srv_ids = set(r189_data[qpe_srv_mask]['Invoice number'].str.lower().unique())
+            logger.info(f"IDs de QPE+SRV únicos no R189: {len(r189_qpe_srv_ids)}")
+            
+            # Contagem de QPE_ID
+            logger.info("Contando QPE_IDs únicos no consolidado QPE")
+            qpe_ids = set(qpe_data['QPE_ID'].str.lower().unique())
+            logger.info(f"QPE IDs únicos no consolidado QPE: {len(qpe_ids)}")
             
             # Adiciona informação de quantidade ao início do relatório
+            # IMPORTANTE: Agora comparamos apenas com QPEs que tenham Invoice Type = "SRV"
             divergences.append({
-                'Tipo': 'CONTAGEM_QPE',
+                'Tipo': 'CONTAGEM_QPE_SRV',
                 'QPE_ID': 'N/A',
                 'CNPJ QPE': 'N/A',
                 'CNPJ R189': 'N/A',
                 'Valor QPE': len(qpe_ids),
-                'Valor R189': len(r189_qpe_ids)
+                'Valor R189': len(r189_qpe_srv_ids),
+                'Detalhes': f'Contagem de QPEs: Consolidado QPE={len(qpe_ids)}, R189 com Type=SRV={len(r189_qpe_srv_ids)}'
             })
             
             # Se houver divergência na quantidade, identifica quais estão faltando
-            if len(qpe_ids) != len(r189_qpe_ids):
-                logger.warning(f"Divergência na contagem de QPE IDs: QPE={len(qpe_ids)}, R189={len(r189_qpe_ids)}")
+            # IMPORTANTE: Agora trabalhamos apenas com QPE+SRV do R189
+            if len(qpe_ids) != len(r189_qpe_srv_ids):
+                logger.warning(f"Divergência na contagem de QPE IDs: QPE={len(qpe_ids)}, R189 SRV={len(r189_qpe_srv_ids)}")
                 
-                # IDs que estão no QPE mas não no R189
-                missing_in_r189 = qpe_ids - r189_qpe_ids
-                logger.info(f"IDs no QPE mas não no R189: {len(missing_in_r189)}")
+                # IDs que estão no QPE mas não no R189 como SRV
+                missing_in_r189_srv = qpe_ids - r189_qpe_srv_ids
+                logger.info(f"IDs no QPE mas não no R189 como SRV: {len(missing_in_r189_srv)}")
                 
-                for qpe_id in missing_in_r189:
+                for qpe_id in missing_in_r189_srv:
+                    # Verificar se o ID existe como outro tipo no R189
+                    r189_outras_rows = r189_data[
+                        (r189_data['Invoice number'].str.lower() == qpe_id) & 
+                        (r189_data['Invoice Type'] != 'SRV')
+                    ]
+                    
+                    if not r189_outras_rows.empty:
+                        # O QPE existe no R189, mas com outro tipo (provavelmente REN)
+                        invoice_type = r189_outras_rows.iloc[0]['Invoice Type']
+                        logger.info(f"QPE {qpe_id} encontrado no R189, mas com Invoice Type={invoice_type}, não SRV")
+                        divergences.append({
+                            'Tipo': 'QPE com tipo diferente de SRV no R189',
+                            'QPE_ID': qpe_id,
+                            'CNPJ QPE': qpe_data[qpe_data['QPE_ID'].str.lower() == qpe_id].iloc[0]['CNPJ'],
+                            'CNPJ R189': r189_outras_rows.iloc[0]['CNPJ - WEG'],
+                            'Valor QPE': qpe_data[qpe_data['QPE_ID'].str.lower() == qpe_id].iloc[0]['VALOR_TOTAL'],
+                            'Valor R189': r189_outras_rows.iloc[0][coluna_total_encontrada],
+                            'Detalhes': f'QPE existe no R189 com Invoice Type={invoice_type}, deveria ser SRV'
+                        })
+                        continue
+                    
+                    # Se o QPE não foi encontrado de forma alguma no R189
                     qpe_rows = qpe_data[qpe_data['QPE_ID'].str.lower() == qpe_id]
                     if not qpe_rows.empty:
                         qpe_row = qpe_rows.iloc[0]
@@ -94,15 +142,20 @@ class DivergenceReportQPER189:
                             'CNPJ QPE': qpe_row['CNPJ'],
                             'CNPJ R189': 'N/A',
                             'Valor QPE': qpe_row['VALOR_TOTAL'],
-                            'Valor R189': 'N/A'
+                            'Valor R189': 'N/A',
+                            'Detalhes': 'QPE não encontrado no R189'
                         })
                 
-                # IDs que estão no R189 mas não no QPE
-                missing_in_qpe = r189_qpe_ids - qpe_ids
-                logger.info(f"IDs no R189 mas não no QPE: {len(missing_in_qpe)}")
+                # IDs que estão no R189 como SRV mas não no QPE
+                missing_in_qpe = r189_qpe_srv_ids - qpe_ids
+                logger.info(f"IDs no R189 como SRV mas não no QPE: {len(missing_in_qpe)}")
                 
                 for r189_id in missing_in_qpe:
-                    r189_rows = r189_data[r189_data['Invoice number'].str.lower() == r189_id]
+                    r189_rows = r189_data[
+                        (r189_data['Invoice number'].str.lower() == r189_id) & 
+                        (r189_data['Invoice Type'] == 'SRV')
+                    ]
+                    
                     if not r189_rows.empty:
                         r189_row = r189_rows.iloc[0]
                         divergences.append({
@@ -111,7 +164,8 @@ class DivergenceReportQPER189:
                             'CNPJ QPE': 'N/A',
                             'CNPJ R189': r189_row['CNPJ - WEG'],
                             'Valor QPE': 'N/A',
-                            'Valor R189': r189_row[coluna_total_encontrada]
+                            'Valor R189': r189_row[coluna_total_encontrada],
+                            'Detalhes': 'QPE com Invoice Type=SRV no R189 não encontrado no consolidado QPE'
                         })
             
             # Verifica se as colunas necessárias existem
@@ -186,12 +240,34 @@ class DivergenceReportQPER189:
                     })
                     continue
                 
-                # Procura o QPE_ID no R189
-                r189_match = r189_data[r189_data['Invoice number'].str.lower() == qpe_id.lower()]
+                # ATUALIZADO: Procura o QPE_ID no R189 apenas com Invoice Type = SRV
+                r189_match = r189_data[
+                    (r189_data['Invoice number'].str.lower() == qpe_id.lower()) & 
+                    (r189_data['Invoice Type'] == 'SRV')
+                ]
                 
                 if r189_match.empty:
-                    # Não adiciona novamente se já foi registrado como ausente
-                    if qpe_id.lower() not in missing_in_r189:
+                    # Verifica se existe com outro tipo
+                    r189_outros_tipos = r189_data[
+                        (r189_data['Invoice number'].str.lower() == qpe_id.lower()) & 
+                        (r189_data['Invoice Type'] != 'SRV')
+                    ]
+                    
+                    if not r189_outros_tipos.empty:
+                        # Existe, mas com outro tipo
+                        invoice_type = r189_outros_tipos.iloc[0]['Invoice Type']
+                        logger.warning(f"QPE_ID {qpe_id} encontrado no R189 com Invoice Type={invoice_type}, não SRV")
+                        divergences.append({
+                            'Tipo': 'QPE com tipo diferente de SRV no R189',
+                            'QPE_ID': qpe_id,
+                            'CNPJ QPE': qpe_cnpj,
+                            'CNPJ R189': r189_outros_tipos.iloc[0]['CNPJ - WEG'],
+                            'Valor QPE': qpe_valor,
+                            'Valor R189': r189_outros_tipos.iloc[0][coluna_total_encontrada],
+                            'Detalhes': f'QPE existe no R189 com Invoice Type={invoice_type}, deveria ser SRV'
+                        })
+                    else:
+                        # Não existe de forma alguma no R189
                         logger.warning(f"QPE_ID {qpe_id} não encontrado no R189")
                         divergences.append({
                             'Tipo': 'QPE_ID não encontrado no R189',
@@ -199,9 +275,11 @@ class DivergenceReportQPER189:
                             'CNPJ QPE': qpe_cnpj,
                             'CNPJ R189': 'Não encontrado',
                             'Valor QPE': qpe_valor,
-                            'Valor R189': 'Não encontrado'
+                            'Valor R189': 'Não encontrado',
+                            'Detalhes': 'QPE não encontrado no R189'
                         })
                 else:
+                    # Encontrou com Invoice Type = SRV, agora verifica CNPJ e valor
                     r189_row = r189_match.iloc[0]
                     r189_cnpj = str(r189_row['CNPJ - WEG']).strip()
                     r189_valor = float(r189_row[coluna_total_encontrada])
