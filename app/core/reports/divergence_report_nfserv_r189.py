@@ -389,10 +389,10 @@ class DivergenceReportNFSERVR189:
 
     async def generate_excel_report(self, divergences_df):
         """
-        Gera um relatório Excel com as divergências encontradas.
+        Gera um relatório Excel com as divergências encontradas, com descrições claras e organizadas.
         """
         try:
-            logger.info("Iniciando geração do relatório Excel")
+            logger.info("Iniciando geração do relatório Excel simplificado e objetivo")
             
             if divergences_df is None:
                 logger.error("DataFrame de divergências é None")
@@ -414,23 +414,164 @@ class DivergenceReportNFSERVR189:
             divergences_df['Data Verificação'] = now.strftime('%Y-%m-%d')
             divergences_df['Hora Verificação'] = now.strftime('%H:%M:%S')
             
+            # Vamos melhorar a organização e clareza das divergências
+            
+            # 1. Remover linha redundante de "CONTAGEM_NFSERV"
+            divergences_df = divergences_df[divergences_df['Tipo'] != 'CONTAGEM_NFSERV']
+            
+            # 2. Organizar por tipo de divergência de maneira lógica
+            # Define ordem de prioridade para os tipos
+            tipo_ordem = {
+                'CONTAGEM_': 0,  # Contagens vêm primeiro
+                'Nota não encontrada': 1,  # Seguido por notas faltantes
+                'ausente': 1,  # Também são notas faltantes
+                'CNPJ': 2,  # Depois vêm divergências de CNPJ
+                'VALOR': 3,  # Por fim divergências de valor
+            }
+            
+            # Função para obter o valor de ordenação por tipo
+            def get_order_value(tipo):
+                for key, value in tipo_ordem.items():
+                    if key in tipo:
+                        return value
+                return 999  # Valor alto para tipos não mapeados
+            
+            # Adicionar coluna de ordenação
+            divergences_df['ordem'] = divergences_df['Tipo'].apply(get_order_value)
+            
+            # 3. Adicionar uma descrição mais clara
+            def melhorar_descricao(row):
+                tipo = row['Tipo']
+                detalhes = row['Detalhes'] if pd.notna(row['Detalhes']) else ""
+                
+                # Para contagens, já temos boas descrições mas vamos remover casas decimais
+                if tipo.startswith('CONTAGEM_'):
+                    # Extrair os valores e convertê-los para inteiros
+                    partes = detalhes.split('=')
+                    if len(partes) >= 3:  # Formato típico: "... NFSERV=X, R189=Y"
+                        prefixo = partes[0] + "="
+                        valor_nfserv_texto = partes[1].split(',')[0].strip()
+                        resto = "," + partes[1].split(',', 1)[1] if ',' in partes[1] else ""
+                        
+                        try:
+                            # Converter para inteiro
+                            valor_nfserv = int(float(valor_nfserv_texto))
+                            valor_r189 = int(float(partes[2].strip()))
+                            
+                            # Reconstruir a string com valores inteiros
+                            return f"{prefixo}{valor_nfserv}{resto} R189={valor_r189}"
+                        except (ValueError, IndexError):
+                            # Se falhar, retorna o original
+                            return detalhes
+                    return detalhes
+                    
+                # Para notas faltantes
+                if 'não encontrada no' in tipo or 'ausente' in tipo:
+                    if 'ausente no NFSERV' in tipo or 'não encontrada no NFSERV' in tipo:
+                        return f"DIVERGÊNCIA: Nota {row['NFSERV_ID']} presente no R189 mas não encontrada no NFSERV"
+                    elif 'ausente no R189' in tipo or 'não encontrada no R189' in tipo:
+                        return f"DIVERGÊNCIA: Nota {row['NFSERV_ID']} presente no NFSERV mas não encontrada no R189"
+                    else:
+                        return f"DIVERGÊNCIA: Nota {row['NFSERV_ID']} ausente em um dos sistemas"
+                
+                # Para CNPJs diferentes
+                if 'CNPJ' in tipo:
+                    return f"DIVERGÊNCIA: CNPJ diferente para nota {row['NFSERV_ID']} - NFSERV: {row['CNPJ NFSERV']}, R189: {row['CNPJ R189']}"
+                    
+                # Para valores diferentes
+                if tipo == 'VALOR':
+                    # Formatar valores para exibição adequada
+                    valor_nfserv = row['Valor NFSERV']
+                    valor_r189 = row['Valor R189']
+                    
+                    # Converter para string se ainda forem números
+                    if isinstance(valor_nfserv, (int, float)):
+                        valor_nfserv = f"{valor_nfserv:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                    if isinstance(valor_r189, (int, float)):
+                        valor_r189 = f"{valor_r189:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                        
+                    return f"DIVERGÊNCIA: Valor diferente para nota {row['NFSERV_ID']} - NFSERV: {valor_nfserv}, R189: {valor_r189}"
+                
+                # Para outros casos
+                return detalhes
+            
+            # Aplicar a função para criar descrições mais claras
+            divergences_df['Descrição Clara'] = divergences_df.apply(melhorar_descricao, axis=1)
+            
+            # 4. Ordenar o DataFrame
+            divergences_df = divergences_df.sort_values(['ordem', 'Tipo', 'NFSERV_ID'])
+            
+            # 5. Criar versão final e remover colunas desnecessárias
+            relatorio_final = divergences_df.drop(['ordem', 'Detalhes'], axis=1, errors='ignore')
+            
+            # 6. Reordenar colunas para melhor visualização
+            ordem_colunas = [
+                'Tipo', 'NFSERV_ID', 'Descrição Clara', 
+                'CNPJ NFSERV', 'CNPJ R189', 
+                'Valor NFSERV', 'Valor R189',
+                'Data Verificação', 'Hora Verificação'
+            ]
+            
+            # Manter apenas colunas que existem
+            ordem_colunas = [col for col in ordem_colunas if col in relatorio_final.columns]
+            relatorio_final = relatorio_final[ordem_colunas]
+            
+            # 7. Formatar valores monetários para exibição
+            for col in ['Valor NFSERV', 'Valor R189']:
+                # Cópia temporária do DataFrame para evitar avisos
+                temp_df = relatorio_final.copy()
+                
+                # Processar cada linha individualmente para decidir a formatação
+                for idx, row in temp_df.iterrows():
+                    valor = row[col]
+                    tipo = row['Tipo']
+                    
+                    # Se for um número e for uma linha de contagem, formatar como inteiro
+                    if (isinstance(valor, (int, float)) or 
+                       (isinstance(valor, str) and valor.replace('.', '').replace(',', '').isdigit())):
+                        try:
+                            valor_numerico = float(str(valor).replace(',', '.'))
+                            
+                            # Contagens (sem casas decimais)
+                            if tipo.startswith('CONTAGEM_'):
+                                relatorio_final.at[idx, col] = f"{int(valor_numerico)}"
+                            # Outros valores (com casas decimais)
+                            else:
+                                relatorio_final.at[idx, col] = f"{valor_numerico:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                        except (ValueError, TypeError):
+                            # Mantém o valor original se não conseguir converter
+                            pass
+            
             try:
-                logger.info("Criando arquivo Excel na memória")
+                logger.info("Criando arquivo Excel na memória com formato simplificado")
                 # Cria o arquivo Excel na memória
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    divergences_df.to_excel(writer, index=False, sheet_name='Divergencias_NFSERV_R189')
+                    relatorio_final.to_excel(writer, index=False, sheet_name='Divergências NFSERV-R189')
                     
                     # Ajusta a largura das colunas
                     workbook = writer.book
-                    worksheet = writer.sheets['Divergencias_NFSERV_R189']
-                    for i, col in enumerate(divergences_df.columns):
-                        max_length = max(
-                            divergences_df[col].astype(str).apply(len).max(),
-                            len(str(col))
-                        )
-                        worksheet.set_column(i, i, max_length + 2)
-                
+                    worksheet = writer.sheets['Divergências NFSERV-R189']
+                    
+                    # Ajustar larguras das colunas
+                    for i, col in enumerate(relatorio_final.columns):
+                        if 'Descrição' in col:
+                            # Coluna de descrição mais larga
+                            worksheet.set_column(i, i, 60)
+                        elif 'CNPJ' in col:
+                            # CNPJs têm tamanho padrão
+                            worksheet.set_column(i, i, 20)
+                        elif 'Valor' in col:
+                            # Valores financeiros
+                            worksheet.set_column(i, i, 15)
+                        else:
+                            # Outras colunas com base no conteúdo
+                            max_length = max(
+                                relatorio_final[col].astype(str).apply(len).max(),
+                                len(str(col))
+                            )
+                            worksheet.set_column(i, i, max_length + 2)
+            
                 output.seek(0)
                 logger.info("Arquivo Excel criado com sucesso")
                 
