@@ -120,7 +120,7 @@ class DivergenceReportSPBR189:
                 for spb_id in spb_srv_missing:
                     r189_row = r189_data[r189_data['Invoice number'] == spb_id].iloc[0]
                     divergences.append({
-                        'Tipo': 'ID encontrado apenas no R189',
+                        'Tipo': 'Invoice number encontrado apenas no R189',
                         'SPB_ID': spb_id,
                         'CNPJ SPB': 'N/A',
                         'CNPJ R189': r189_row['CNPJ - WEG'],
@@ -152,7 +152,7 @@ class DivergenceReportSPBR189:
                         # Não existe no R189
                         spb_row = spb_data[spb_data['SPB_ID'] == spb_id].iloc[0]
                         divergences.append({
-                            'Tipo': 'ID do SPB não encontrado no R189',
+                            'Tipo': 'Invoice number do SPB não encontrado no R189',
                             'SPB_ID': spb_id,
                             'CNPJ SPB': spb_row['CNPJ'],
                             'CNPJ R189': 'N/A',

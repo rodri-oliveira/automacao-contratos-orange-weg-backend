@@ -414,6 +414,10 @@ class DivergenceReportNFSERVR189:
             divergences_df['Data Verificação'] = now.strftime('%Y-%m-%d')
             divergences_df['Hora Verificação'] = now.strftime('%H:%M:%S')
             
+            # Substituir "Nota não encontrada" por "Invoice number não encontrado" na coluna Tipo
+            divergences_df['Tipo'] = divergences_df['Tipo'].replace('Nota não encontrada no NFSERV', 'Invoice number não encontrado no NFSERV')
+            divergences_df['Tipo'] = divergences_df['Tipo'].replace('Nota não encontrada no R189', 'Invoice number não encontrado no R189')
+            
             # Vamos melhorar a organização e clareza das divergências
             
             # 1. Remover linha redundante de "CONTAGEM_NFSERV"
@@ -423,7 +427,7 @@ class DivergenceReportNFSERVR189:
             # Define ordem de prioridade para os tipos
             tipo_ordem = {
                 'CONTAGEM_': 0,  # Contagens vêm primeiro
-                'Nota não encontrada': 1,  # Seguido por notas faltantes
+                'Invoice number não encontrado': 1,  # Seguido por notas faltantes
                 'ausente': 1,  # Também são notas faltantes
                 'CNPJ': 2,  # Depois vêm divergências de CNPJ
                 'VALOR': 3,  # Por fim divergências de valor
@@ -465,18 +469,18 @@ class DivergenceReportNFSERVR189:
                             return detalhes
                     return detalhes
                     
-                # Para notas faltantes
+                # Para notas faltantes - Substituir "Nota" por "Invoice number"
                 if 'não encontrada no' in tipo or 'ausente' in tipo:
-                    if 'ausente no NFSERV' in tipo or 'não encontrada no NFSERV' in tipo:
-                        return f"DIVERGÊNCIA: Nota {row['NFSERV_ID']} presente no R189 mas não encontrada no NFSERV"
-                    elif 'ausente no R189' in tipo or 'não encontrada no R189' in tipo:
-                        return f"DIVERGÊNCIA: Nota {row['NFSERV_ID']} presente no NFSERV mas não encontrada no R189"
+                    if 'ausente no NFSERV' in tipo or 'não encontrado no NFSERV' in tipo:
+                        return f"DIVERGÊNCIA: Invoice number {row['NFSERV_ID']} presente no R189 mas não encontrado no NFSERV"
+                    elif 'ausente no R189' in tipo or 'não encontrado no R189' in tipo:
+                        return f"DIVERGÊNCIA: Invoice number {row['NFSERV_ID']} presente no NFSERV mas não encontrado no R189"
                     else:
-                        return f"DIVERGÊNCIA: Nota {row['NFSERV_ID']} ausente em um dos sistemas"
+                        return f"DIVERGÊNCIA: Invoice number {row['NFSERV_ID']} ausente em um dos sistemas"
                 
                 # Para CNPJs diferentes
                 if 'CNPJ' in tipo:
-                    return f"DIVERGÊNCIA: CNPJ diferente para nota {row['NFSERV_ID']} - NFSERV: {row['CNPJ NFSERV']}, R189: {row['CNPJ R189']}"
+                    return f"DIVERGÊNCIA: CNPJ diferente para invoice number {row['NFSERV_ID']} - NFSERV: {row['CNPJ NFSERV']}, R189: {row['CNPJ R189']}"
                     
                 # Para valores diferentes
                 if tipo == 'VALOR':
@@ -490,10 +494,10 @@ class DivergenceReportNFSERVR189:
                     if isinstance(valor_r189, (int, float)):
                         valor_r189 = f"{valor_r189:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
                         
-                    return f"DIVERGÊNCIA: Valor diferente para nota {row['NFSERV_ID']} - NFSERV: {valor_nfserv}, R189: {valor_r189}"
+                    return f"DIVERGÊNCIA: Valor diferente para invoice number {row['NFSERV_ID']} - NFSERV: {valor_nfserv}, R189: {valor_r189}"
                 
                 # Para outros casos
-                return detalhes
+                return detalhes.replace("nota ", "invoice number ").replace("Nota ", "Invoice number ")
             
             # Aplicar a função para criar descrições mais claras
             divergences_df['Descrição Clara'] = divergences_df.apply(melhorar_descricao, axis=1)
