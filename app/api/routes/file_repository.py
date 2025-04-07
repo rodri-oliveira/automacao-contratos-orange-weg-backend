@@ -25,6 +25,9 @@ from app.api.routes.file_processor import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# URL base para acesso ao SharePoint Contratos (com base no curl que funcionou)
+SHAREPOINT_CONTRATOS_BASE_URL = "https://weg365.sharepoint.com/teams/BR-TI-TIN/contratos"
+
 router = APIRouter(
     prefix="/files-repository",
     tags=["files-repository"],
@@ -59,7 +62,7 @@ def encode_sharepoint_path(path):
 
 # Caminhos das pastas de origem - mantendo os originais para referência
 ORIGINAL_PATHS = {
-    "ENTRADA": "/teams/BR-TI-TIN/AutomaoFinanas/ENTRADA",
+    "ENTRADA": "/teams/BR-TI-TIN/AutomaoFinanas/ENTRADA",   
     "R189": "/teams/BR-TI-TIN/AutomaoFinanas/R189",
     "QPE": "/teams/BR-TI-TIN/AutomaoFinanas/QPE",
     "NFSERV": "/teams/BR-TI-TIN/AutomaoFinanas/NFSERV",
@@ -152,6 +155,11 @@ async def copy_file_to_repository(token, site_url, source_path, file_name, desti
     Copia um arquivo de uma pasta para outra no SharePoint.
     """
     try:
+        # Log para monitoramento - início da operação
+        logger.info(f"[REPOSITORY] Iniciando cópia do arquivo {file_name}")
+        logger.info(f"[REPOSITORY] Origem: {source_path}")
+        logger.info(f"[REPOSITORY] Destino: {destination_path}")
+        
         # Verificar se o processo foi cancelado
         if check_if_cancelled():
             logger.info(f"[REPOSITORY] Cópia do arquivo {file_name} cancelada pelo usuário")
@@ -160,30 +168,38 @@ async def copy_file_to_repository(token, site_url, source_path, file_name, desti
         # Codificar corretamente os caminhos
         encoded_source_path = encode_sharepoint_path(source_path)
         
-        logger.info(f"[REPOSITORY] Copiando arquivo {file_name}")
-        logger.info(f"[REPOSITORY] De: {encoded_source_path}")
-        logger.info(f"[REPOSITORY] Para: {destination_path}")
-        
         # Download do arquivo
+        start_download = datetime.now()
         file_content = await download_file(token, site_url, encoded_source_path, file_name)
+        download_duration = (datetime.now() - start_download).total_seconds()
         
         if not file_content:
             logger.error(f"[REPOSITORY] Não foi possível baixar o arquivo {file_name}")
             return False
+        
+        # Log de sucesso do download
+        if isinstance(file_content, BytesIO):
+            file_size = file_content.getbuffer().nbytes
+        else:
+            file_size = len(file_content)
+            
+        logger.info(f"[REPOSITORY] Download concluído em {download_duration:.2f}s, tamanho: {file_size} bytes")
         
         # Verificar novamente se o processo foi cancelado após download
         if check_if_cancelled():
             logger.info(f"[REPOSITORY] Cópia do arquivo {file_name} cancelada após download")
             return False
         
-        # Upload para o destino usando nossa nova função que sabemos que funciona
+        # Upload para o destino
+        start_upload = datetime.now()
         success = await upload_file_to_repository(token, file_content, file_name, destination_path)
+        upload_duration = (datetime.now() - start_upload).total_seconds()
         
         if success:
-            logger.info(f"[REPOSITORY] Arquivo {file_name} copiado com sucesso")
+            logger.info(f"[REPOSITORY] Arquivo {file_name} copiado com sucesso em {upload_duration:.2f}s")
             return True
         else:
-            logger.error(f"[REPOSITORY] Falha ao copiar arquivo {file_name}")
+            logger.error(f"[REPOSITORY] Falha ao copiar arquivo {file_name}, tempo: {upload_duration:.2f}s")
             return False
     except Exception as e:
         logger.error(f"[REPOSITORY] Exceção ao copiar arquivo: {str(e)}")
@@ -191,9 +207,12 @@ async def copy_file_to_repository(token, site_url, source_path, file_name, desti
         return False
 
 @router.post("/copy-to-repository")
-async def copy_files_to_repository():
+async def copy_files_to_repository(clean_folders: bool = True):
     """
-    Endpoint para copiar arquivos para o repositório, usando apenas pastas existentes.
+    Endpoint para copiar arquivos para o repositório, usando estrutura de pastas por data.
+    
+    Args:
+        clean_folders: Se True, limpa as pastas do mês atual antes de usar
     """
     try:
         global PROCESS_CANCELLED
@@ -201,6 +220,7 @@ async def copy_files_to_repository():
         PROCESS_CANCELLED = False
         
         logger.info("[REPOSITORY] Iniciando processo de cópia para o repositório")
+        logger.info(f"[REPOSITORY] Opção de limpar pastas: {clean_folders}")
         
         # Obter token e URL do site
         from app.core.auth import SharePointAuth
@@ -214,17 +234,55 @@ async def copy_files_to_repository():
         
         logger.info(f"[REPOSITORY] Token obtido com sucesso. Site URL: {site_url}")
         
-        # Verificar se as pastas de destino existem
+        # Obter data atual para estrutura de pastas
+        current_date = datetime.now()
+        current_year = str(current_date.year)
+        current_year_month = f"{current_date.year}.{current_date.month:02d}"
+        logger.info(f"[REPOSITORY] Estrutura de pastas: ano={current_year}, mês={current_year_month}")
+        
+        # Preparar estrutura de pastas por data para cada repositório
         dest_folders = {}
-        for folder_name, folder_path in REPOSITORY_PATHS.items():
+        dest_paths = {}
+        
+        for folder_name, base_path in REPOSITORY_PATHS.items():
             # Verificar cancelamento
             if check_if_cancelled():
-                logger.info("[REPOSITORY] Processo cancelado durante verificação de pastas")
+                logger.info("[REPOSITORY] Processo cancelado durante preparação de pastas")
                 return {"success": False, "message": "Processo cancelado pelo usuário", "cancelled": True}
-                
-            folder_exists = await check_folder_exists(token, site_url, folder_path)
-            dest_folders[folder_name] = folder_exists
-            logger.info(f"[REPOSITORY] Pasta {folder_name} ({folder_path}) existe: {folder_exists}")
+            
+            # Montar caminhos para estrutura de pastas
+            year_path = f"{base_path}/{current_year}"
+            year_month_path = f"{year_path}/{current_year_month}"
+            
+            # Verificar/criar pasta do ano
+            year_folder_exists = await check_folder_exists(token, SHAREPOINT_CONTRATOS_BASE_URL, year_path)
+            if not year_folder_exists:
+                logger.info(f"[REPOSITORY] Criando pasta do ano: {year_path}")
+                year_created = await create_folder(token, SHAREPOINT_CONTRATOS_BASE_URL, year_path)
+                if not year_created:
+                    logger.error(f"[REPOSITORY] Falha ao criar pasta do ano: {year_path}")
+                    dest_folders[folder_name] = False
+                    continue
+            
+            # Verificar/criar pasta do mês
+            month_folder_exists = await check_folder_exists(token, SHAREPOINT_CONTRATOS_BASE_URL, year_month_path)
+            if month_folder_exists and clean_folders:
+                # Limpar pasta do mês se já existir e clean_folders=True
+                logger.info(f"[REPOSITORY] Limpando pasta existente: {year_month_path}")
+                await clean_folder(token, year_month_path)
+            elif not month_folder_exists:
+                # Criar pasta do mês se não existir
+                logger.info(f"[REPOSITORY] Criando pasta do mês: {year_month_path}")
+                month_created = await create_folder(token, SHAREPOINT_CONTRATOS_BASE_URL, year_month_path)
+                if not month_created:
+                    logger.error(f"[REPOSITORY] Falha ao criar pasta do mês: {year_month_path}")
+                    dest_folders[folder_name] = False
+                    continue
+            
+            # Armazenar caminhos e status
+            dest_folders[folder_name] = True
+            dest_paths[folder_name] = year_month_path
+            logger.info(f"[REPOSITORY] Pasta {folder_name} preparada: {year_month_path}")
         
         # Contadores
         total_files = 0
@@ -260,8 +318,12 @@ async def copy_files_to_repository():
                 if re.search(r"QPE-\d{6}[A-Za-z]", file_name) and dest_folders.get("CADASTRAR"):
                     logger.info(f"[REPOSITORY] Arquivo {file_name} corresponde ao critério para CADASTRAR")
                     
+                    # Usar o caminho final com estrutura de ano/ano.mês
+                    final_dest_path = dest_paths["CADASTRAR"]
+                    
+                    # Copiar o arquivo
                     success = await copy_file_to_repository(
-                        token, site_url, PATHS["NFSERV"], file_name, REPOSITORY_PATHS["CADASTRAR"]
+                        token, site_url, PATHS["NFSERV"], file_name, final_dest_path
                     )
                     
                     if success:
@@ -278,8 +340,12 @@ async def copy_files_to_repository():
                 if has_city and has_pattern and dest_folders.get("ESCRITURAR"):
                     logger.info(f"[REPOSITORY] Arquivo {file_name} corresponde ao critério para ESCRITURAR")
                     
+                    # Usar o caminho final com estrutura de ano/ano.mês
+                    final_dest_path = dest_paths["ESCRITURAR"]
+                    
+                    # Copiar o arquivo
                     success = await copy_file_to_repository(
-                        token, site_url, PATHS["NFSERV"], file_name, REPOSITORY_PATHS["ESCRITURAR"]
+                        token, site_url, PATHS["NFSERV"], file_name, final_dest_path
                     )
                     
                     if success:
@@ -316,6 +382,9 @@ async def copy_files_to_repository():
             qpe_files = await list_files(token, site_url, PATHS["QPE"])
             total_files += len(qpe_files)
             
+            # Usar o caminho final com estrutura de ano/ano.mês
+            final_dest_path = dest_paths["NOTA_FISCAL"]
+            
             for file in qpe_files:
                 # Verificar cancelamento
                 if check_if_cancelled():
@@ -333,15 +402,19 @@ async def copy_files_to_repository():
                     }
                     
                 file_name = file.get("Name")
+                logger.info(f"[REPOSITORY] Processando arquivo QPE: {file_name}")
                 
+                # Copiar o arquivo para a pasta NOTA_FISCAL
                 success = await copy_file_to_repository(
-                    token, site_url, PATHS["QPE"], file_name, REPOSITORY_PATHS["NOTA_FISCAL"]
+                    token, site_url, PATHS["QPE"], file_name, final_dest_path
                 )
                 
                 if success:
                     copied_files += 1
+                    logger.info(f"[REPOSITORY] Arquivo QPE {file_name} copiado com sucesso")
                 else:
                     failed_files += 1
+                    logger.error(f"[REPOSITORY] Falha ao copiar arquivo QPE {file_name}")
         else:
             logger.error("[REPOSITORY] Pasta NOTA_FISCAL não existe, ignorando arquivos QPE")
             qpe_files = await list_files(token, site_url, PATHS["QPE"])
@@ -369,6 +442,9 @@ async def copy_files_to_repository():
             spb_files = await list_files(token, site_url, PATHS["SPB"])
             total_files += len(spb_files)
             
+            # Usar o caminho final com estrutura de ano/ano.mês
+            final_dest_path = dest_paths["NOTA_FISCAL"]
+            
             for file in spb_files:
                 # Verificar cancelamento
                 if check_if_cancelled():
@@ -386,15 +462,19 @@ async def copy_files_to_repository():
                     }
                     
                 file_name = file.get("Name")
+                logger.info(f"[REPOSITORY] Processando arquivo SPB: {file_name}")
                 
+                # Copiar o arquivo para a pasta NOTA_FISCAL
                 success = await copy_file_to_repository(
-                    token, site_url, PATHS["SPB"], file_name, REPOSITORY_PATHS["NOTA_FISCAL"]
+                    token, site_url, PATHS["SPB"], file_name, final_dest_path
                 )
                 
                 if success:
                     copied_files += 1
+                    logger.info(f"[REPOSITORY] Arquivo SPB {file_name} copiado com sucesso")
                 else:
                     failed_files += 1
+                    logger.error(f"[REPOSITORY] Falha ao copiar arquivo SPB {file_name}")
         else:
             logger.error("[REPOSITORY] Pasta NOTA_FISCAL não existe, ignorando arquivos SPB")
             spb_files = await list_files(token, site_url, PATHS["SPB"])
@@ -415,10 +495,12 @@ async def copy_files_to_repository():
                 "total_files": total_files,
                 "copied_files": copied_files,
                 "failed_files": failed_files,
-                "skipped_files": skipped_files
+                "skipped_files": skipped_files,
+                "cleaned_folders": clean_folders
             },
             "destination_folders": {
-                k: v for k, v in dest_folders.items()
+                k: {"exists": v, "path": dest_paths.get(k)} 
+                for k, v in dest_folders.items()
             }
         }
     except Exception as e:
@@ -703,6 +785,7 @@ async def test_curl_exact():
         # Logs para verificar o token e site_url
         logger.info(f"[CURL-EXACT] Token obtido (primeiros 20 caracteres): {token[:20]}...")
         logger.info(f"[CURL-EXACT] Site URL: {site_url}")
+        logger.info(f"[CURL-EXACT] URL base do Contratos: {SHAREPOINT_CONTRATOS_BASE_URL}")
         
         # Usar exatamente o mesmo caminho do curl
         folder_path = "/teams/BR-TI-TIN/contratos/Telecom/Repositório_Faturas_Auto_Orange/Cadastrar"
@@ -711,8 +794,8 @@ async def test_curl_exact():
         # Criar um arquivo de teste simples
         test_content = f"Teste exato de curl - {datetime.now()}".encode('utf-8')
         
-        # Construir a URL exatamente como no curl
-        url = f"https://weg365.sharepoint.com/teams/BR-TI-TIN/contratos/_api/web/GetFolderByServerRelativeUrl('{folder_path}')/Files/add(overwrite=true,url='{test_filename}')"
+        # Construir a URL usando nossa constante global
+        url = f"{SHAREPOINT_CONTRATOS_BASE_URL}/_api/web/GetFolderByServerRelativeUrl('{folder_path}')/Files/add(overwrite=true,url='{test_filename}')"
         
         logger.info(f"[CURL-EXACT] URL construída: {url}")
         
@@ -724,22 +807,33 @@ async def test_curl_exact():
         
         logger.info(f"[CURL-EXACT] Headers: {headers}")
         
-        # Fazer o upload usando requests (não aiohttp, para ser o mais próximo possível do curl)
-        response = requests.post(url, headers=headers, data=test_content)
-        
-        logger.info(f"[CURL-EXACT] Status code: {response.status_code}")
-        logger.info(f"[CURL-EXACT] Resposta: {response.text[:500]}...")
-        
-        success = response.status_code in [200, 201]
-        
-        return {
-            "success": success,
-            "status_code": response.status_code,
-            "path": folder_path,
-            "filename": test_filename,
-            "timestamp": str(datetime.now()),
-            "response_snippet": response.text[:200] if response.text else None
-        }
+        # Fazer o upload com tratamento de erros melhorado
+        try:
+            response = requests.post(url, headers=headers, data=test_content, timeout=60)
+            
+            logger.info(f"[CURL-EXACT] Status code: {response.status_code}")
+            logger.info(f"[CURL-EXACT] Resposta: {response.text[:500]}...")
+            
+            success = response.status_code in [200, 201]
+            
+            return {
+                "success": success,
+                "status_code": response.status_code,
+                "path": folder_path,
+                "filename": test_filename,
+                "timestamp": str(datetime.now()),
+                "response_snippet": response.text[:200] if response.text else None
+            }
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[CURL-EXACT] Erro de conexão: {str(e)}")
+            return {"success": False, "error": f"Erro de conexão: {str(e)}"}
+        except requests.exceptions.Timeout as e:
+            logger.error(f"[CURL-EXACT] Timeout na requisição: {str(e)}")
+            return {"success": False, "error": f"Timeout na requisição: {str(e)}"}
+        except Exception as e:
+            logger.error(f"[CURL-EXACT] Erro: {str(e)}")
+            return {"success": False, "error": f"Erro genérico: {str(e)}"}
+            
     except Exception as e:
         logger.error(f"[CURL-EXACT] Erro: {str(e)}")
         logger.error(traceback.format_exc())
@@ -751,12 +845,11 @@ async def upload_file_to_repository(token, file_content, file_name, destination_
     Esta função substitui a chamada para 'upload_file' em copy_file_to_repository.
     """
     try:
-        # IMPORTANTE: Usar a URL base correta
-        base_url = "https://weg365.sharepoint.com/teams/BR-TI-TIN/contratos"
+        # IMPORTANTE: Usar a URL base correta da constante global
         encoded_file_name = urllib.parse.quote(file_name)
         
-        # Construir URL exatamente como no teste que funcionou
-        upload_url = f"{base_url}/_api/web/GetFolderByServerRelativeUrl('{destination_path}')/Files/add(overwrite=true,url='{encoded_file_name}')"
+        # Construir URL usando a constante global
+        upload_url = f"{SHAREPOINT_CONTRATOS_BASE_URL}/_api/web/GetFolderByServerRelativeUrl('{destination_path}')/Files/add(overwrite=true,url='{encoded_file_name}')"
         
         logger.info(f"[UPLOAD_REPO] URL completa: {upload_url}")
         
@@ -774,21 +867,31 @@ async def upload_file_to_repository(token, file_content, file_name, destination_
             content = file_content
         
         # Fazer o request com requests (síncrono mas dentro de async function)
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None, 
-            lambda: requests.post(upload_url, headers=headers, data=content)
-        )
-        
-        logger.info(f"[UPLOAD_REPO] Status: {response.status_code}")
-        logger.info(f"[UPLOAD_REPO] Resposta: {response.text[:200]}...")
-        
-        if response.status_code in [200, 201]:
-            logger.info(f"[UPLOAD_REPO] Arquivo {file_name} enviado com sucesso para {destination_path}")
-            return True
-        else:
-            logger.error(f"[UPLOAD_REPO] Falha ao enviar arquivo {file_name}: {response.status_code}")
-            logger.error(f"[UPLOAD_REPO] Resposta: {response.text}")
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, 
+                lambda: requests.post(upload_url, headers=headers, data=content, timeout=60)
+            )
+            
+            logger.info(f"[UPLOAD_REPO] Status: {response.status_code}")
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"[UPLOAD_REPO] Arquivo {file_name} enviado com sucesso para {destination_path}")
+                return True
+            else:
+                logger.error(f"[UPLOAD_REPO] Falha ao enviar arquivo {file_name}: {response.status_code}")
+                logger.error(f"[UPLOAD_REPO] Resposta: {response.text}")
+                return False
+                
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[UPLOAD_REPO] Erro de conexão ao enviar {file_name}: {str(e)}")
+            return False
+        except requests.exceptions.Timeout as e:
+            logger.error(f"[UPLOAD_REPO] Timeout ao enviar {file_name}: {str(e)}")
+            return False
+        except Exception as e:
+            logger.error(f"[UPLOAD_REPO] Erro ao enviar {file_name}: {str(e)}")
             return False
             
     except Exception as e:
@@ -853,3 +956,323 @@ async def debug_auth():
         logger.error(f"[DEBUG-AUTH] Erro: {str(e)}")
         logger.error(traceback.format_exc())
         return {"success": False, "error": str(e)}
+
+@router.get("/health-check")
+async def sharepoint_health_check():
+    """
+    Endpoint para verificar a saúde da conexão com o SharePoint.
+    Pode ser chamado periodicamente para monitoramento.
+    """
+    try:
+        start_time = datetime.now()
+        
+        # Obter autenticação
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        
+        if not token:
+            return {
+                "status": "error", 
+                "message": "Falha ao obter token de autenticação",
+                "timestamp": str(datetime.now())
+            }
+        
+        # Testar acesso às pastas principais
+        results = {}
+        
+        # Testar pasta de origem de NFSERV
+        nfserv_path = PATHS["NFSERV"]
+        try:
+            nfserv_exists = await check_folder_exists(token, auth.site_url, nfserv_path)
+            results["nfserv"] = {
+                "path": nfserv_path,
+                "exists": nfserv_exists
+            }
+        except Exception as e:
+            results["nfserv"] = {"error": str(e)}
+        
+        # Testar pasta de destino CADASTRAR
+        cadastrar_path = REPOSITORY_PATHS["CADASTRAR"]
+        try:
+            # Testar acesso e tentar listar arquivos
+            cadastrar_exists = await check_folder_exists(token, SHAREPOINT_CONTRATOS_BASE_URL, cadastrar_path)
+            results["cadastrar"] = {
+                "path": cadastrar_path,
+                "exists": cadastrar_exists
+            }
+            
+            if cadastrar_exists:
+                # Testar criação de arquivo simples
+                test_filename = f"healthcheck_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
+                test_content = f"Health check: {datetime.now()}".encode('utf-8')
+                
+                upload_success = await upload_file_to_repository(
+                    token, test_content, test_filename, cadastrar_path
+                )
+                
+                results["upload_test"] = {
+                    "success": upload_success,
+                    "filename": test_filename
+                }
+        except Exception as e:
+            results["cadastrar"] = {"error": str(e)}
+        
+        # Calcular tempo total
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        return {
+            "status": "success" if all(r.get("exists", False) for r in results.values() if "error" not in r) else "warning",
+            "timestamp": str(end_time),
+            "duration_seconds": duration,
+            "results": results
+        }
+    except Exception as e:
+        logger.error(f"[HEALTH] Erro no health check: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {
+            "status": "error",
+            "message": str(e),
+            "timestamp": str(datetime.now())
+        }
+
+async def prepare_date_folder_structure(token, site_url, base_folder_path, clean_month_folder=True):
+    """
+    Prepara a estrutura de pastas por data (ano/ano.mês)
+    e retorna o caminho completo para o destino final.
+    
+    Args:
+        token: Token de autenticação
+        site_url: URL base do site SharePoint
+        base_folder_path: Caminho base (ex: /teams/BR-TI-TIN/contratos/Telecom/Repositório_Faturas_Auto_Orange/Cadastrar)
+        clean_month_folder: Se True, limpa a pasta do mês se ela já existir
+        
+    Returns:
+        caminho completo para pasta destino (ex: /teams/BR-TI-TIN/contratos/Telecom/Repositório_Faturas_Auto_Orange/Cadastrar/2025/2025.04)
+    """
+    try:
+        logger.info(f"[DATE_FOLDER] Preparando estrutura de pastas para {base_folder_path}")
+        
+        # Obter ano e mês atuais
+        current_date = datetime.now()
+        current_year = str(current_date.year)
+        current_year_month = f"{current_date.year}.{current_date.month:02d}"
+        
+        logger.info(f"[DATE_FOLDER] Data atual: Ano={current_year}, Mês={current_year_month}")
+        
+        # Verificar se a pasta do ano existe
+        year_folder_path = f"{base_folder_path}/{current_year}"
+        year_folder_exists = await check_folder_exists(token, SHAREPOINT_CONTRATOS_BASE_URL, year_folder_path)
+        
+        # Criar pasta do ano se não existir
+        if not year_folder_exists:
+            logger.info(f"[DATE_FOLDER] Criando pasta do ano: {year_path}")
+            year_folder_created = await create_folder(token, SHAREPOINT_CONTRATOS_BASE_URL, year_folder_path)
+            
+            if not year_folder_created:
+                logger.error(f"[DATE_FOLDER] Falha ao criar pasta do ano: {year_path}")
+                return None
+            
+            logger.info(f"[DATE_FOLDER] Pasta do ano criada com sucesso: {year_path}")
+        else:
+            logger.info(f"[DATE_FOLDER] Pasta do ano já existe: {year_path}")
+        
+        # Caminho para pasta ano.mês
+        year_month_folder_path = f"{year_folder_path}/{current_year_month}"
+        year_month_folder_exists = await check_folder_exists(token, SHAREPOINT_CONTRATOS_BASE_URL, year_month_folder_path)
+        
+        # Se a pasta ano.mês existir e precisamos limpar
+        if year_month_folder_exists and clean_month_folder:
+            logger.info(f"[DATE_FOLDER] Limpando conteúdo da pasta ano.mês existente: {year_month_folder_path}")
+            cleaned = await clean_folder(token, year_month_folder_path)
+            
+            if not cleaned:
+                logger.warning(f"[DATE_FOLDER] Aviso: Houve problemas ao limpar a pasta {year_month_folder_path}")
+                # Continuamos mesmo se houver problemas na limpeza
+        elif year_month_folder_exists:
+            logger.info(f"[DATE_FOLDER] Pasta ano.mês já existe e não será limpa: {year_month_folder_path}")
+        else:
+            # Criar pasta ano.mês
+            logger.info(f"[DATE_FOLDER] Criando pasta ano.mês: {year_month_folder_path}")
+            year_month_folder_created = await create_folder(token, SHAREPOINT_CONTRATOS_BASE_URL, year_month_folder_path)
+            
+            if not year_month_folder_created:
+                logger.error(f"[DATE_FOLDER] Falha ao criar pasta ano.mês: {year_month_folder_path}")
+                return None
+            
+            logger.info(f"[DATE_FOLDER] Pasta ano.mês criada com sucesso: {year_month_folder_path}")
+        
+        # Retornar o caminho completo para a pasta de destino
+        return year_month_folder_path
+        
+    except Exception as e:
+        logger.error(f"[DATE_FOLDER] Erro ao preparar estrutura de pastas: {str(e)}")
+        logger.error(traceback.format_exc())
+        return None
+
+@router.get("/test-folder-structure")
+async def test_folder_structure(clean_folders: bool = True):
+    """
+    Endpoint para testar a criação da estrutura de pastas por data.
+    
+    Args:
+        clean_folders: Se True, limpa as pastas do mês atual antes de usar
+    """
+    try:
+        # Obter autenticação
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        site_url = auth.site_url
+        
+        if not token:
+            return {"success": False, "error": "Falha ao obter token"}
+        
+        # Obter data atual
+        current_date = datetime.now()
+        current_year = str(current_date.year)
+        current_year_month = f"{current_date.year}.{current_date.month:02d}"
+        
+        # Testar para cada tipo de pasta
+        results = {}
+        
+        for folder_type, base_path in REPOSITORY_PATHS.items():
+            try:
+                # Construir caminhos
+                year_path = f"{base_path}/{current_year}"
+                year_month_path = f"{year_path}/{current_year_month}"
+                
+                # Verificar/criar pasta do ano
+                year_folder_exists = await check_folder_exists(token, SHAREPOINT_CONTRATOS_BASE_URL, year_path)
+                if not year_folder_exists:
+                    logger.info(f"[TEST] Criando pasta do ano: {year_path}")
+                    year_created = await create_folder(token, SHAREPOINT_CONTRATOS_BASE_URL, year_path)
+                    if not year_created:
+                        logger.error(f"[TEST] Falha ao criar pasta do ano: {year_path}")
+                        results[folder_type] = {
+                            "base_path": base_path,
+                            "structure_created": False,
+                            "error": "Falha ao criar pasta do ano"
+                        }
+                        continue
+                
+                # Verificar/criar pasta do mês
+                month_folder_exists = await check_folder_exists(token, SHAREPOINT_CONTRATOS_BASE_URL, year_month_path)
+                if month_folder_exists and clean_folders:
+                    # Limpar pasta do mês
+                    logger.info(f"[TEST] Limpando pasta existente: {year_month_path}")
+                    await clean_folder(token, year_month_path)
+                elif not month_folder_exists:
+                    # Criar pasta do mês
+                    logger.info(f"[TEST] Criando pasta do mês: {year_month_path}")
+                    month_created = await create_folder(token, SHAREPOINT_CONTRATOS_BASE_URL, year_month_path)
+                    if not month_created:
+                        logger.error(f"[TEST] Falha ao criar pasta do mês: {year_month_path}")
+                        results[folder_type] = {
+                            "base_path": base_path,
+                            "structure_created": False,
+                            "error": "Falha ao criar pasta do mês"
+                        }
+                        continue
+                
+                # Testar upload para a pasta
+                test_content = f"Teste da estrutura de pastas para {folder_type} - {datetime.now()}".encode('utf-8')
+                test_filename = f"teste_estrutura_{folder_type.lower()}_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
+                
+                # Upload do arquivo
+                upload_success = await upload_file_to_repository(token, test_content, test_filename, year_month_path)
+                
+                results[folder_type] = {
+                    "base_path": base_path,
+                    "year_path": year_path,
+                    "year_month_path": year_month_path,
+                    "structure_created": True,
+                    "cleaned": clean_folders and month_folder_exists,
+                    "test_file_uploaded": upload_success,
+                    "test_filename": test_filename if upload_success else None
+                }
+            except Exception as e:
+                logger.error(f"[TEST] Erro ao processar pasta {folder_type}: {str(e)}")
+                results[folder_type] = {
+                    "base_path": base_path,
+                    "structure_created": False,
+                    "error": f"Exceção: {str(e)}"
+                }
+        
+        return {
+            "success": all(r.get("structure_created", False) for r in results.values()),
+            "timestamp": str(datetime.now()),
+            "year": current_year,
+            "year_month": current_year_month,
+            "cleaned_folders": clean_folders,
+            "results": results
+        }
+    except Exception as e:
+        logger.error(f"[TEST-STRUCTURE] Erro global: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
+
+async def clean_folder(token, folder_path):
+    """
+    Remove todos os arquivos de uma pasta no SharePoint.
+    
+    Args:
+        token: Token de autenticação
+        folder_path: Caminho da pasta a ser limpa
+        
+    Returns:
+        bool: True se a limpeza foi bem-sucedida, False caso contrário
+    """
+    try:
+        logger.info(f"[CLEAN_FOLDER] Iniciando limpeza da pasta: {folder_path}")
+        
+        # Listar todos os arquivos na pasta
+        files = await list_files(token, SHAREPOINT_CONTRATOS_BASE_URL, folder_path)
+        
+        if not files:
+            logger.info(f"[CLEAN_FOLDER] Pasta vazia ou não encontrada: {folder_path}")
+            return True
+        
+        logger.info(f"[CLEAN_FOLDER] Encontrados {len(files)} arquivos para remover")
+        
+        # Remover cada arquivo
+        success_count = 0
+        fail_count = 0
+        
+        for file in files:
+            file_name = file.get("Name")
+            
+            try:
+                # Construir a URL para excluir o arquivo
+                delete_url = f"{SHAREPOINT_CONTRATOS_BASE_URL}/_api/web/GetFileByServerRelativeUrl('{folder_path}/{file_name}')/recycleObject"
+                
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json;odata=verbose",
+                    "Content-Type": "application/json;odata=verbose",
+                    "X-HTTP-Method": "POST"
+                }
+                
+                # Executar a solicitação de exclusão
+                response = requests.post(delete_url, headers=headers)
+                
+                if response.status_code in [200, 201, 204]:
+                    logger.info(f"[CLEAN_FOLDER] Arquivo removido com sucesso: {file_name}")
+                    success_count += 1
+                else:
+                    logger.error(f"[CLEAN_FOLDER] Falha ao remover arquivo {file_name}: {response.status_code}")
+                    logger.error(f"[CLEAN_FOLDER] Resposta: {response.text}")
+                    fail_count += 1
+                    
+            except Exception as e:
+                logger.error(f"[CLEAN_FOLDER] Erro ao remover arquivo {file_name}: {str(e)}")
+                fail_count += 1
+        
+        # Verificar resultado
+        logger.info(f"[CLEAN_FOLDER] Resultado da limpeza: {success_count} arquivos removidos, {fail_count} falhas")
+        
+        return fail_count == 0
+        
+    except Exception as e:
+        logger.error(f"[CLEAN_FOLDER] Erro ao limpar pasta: {str(e)}")
+        logger.error(traceback.format_exc())
+        return False
