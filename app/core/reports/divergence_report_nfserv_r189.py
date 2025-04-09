@@ -233,7 +233,7 @@ class DivergenceReportNFSERVR189:
                 
                 # Contagem no R189
                 r189_count = len(r189_data[r189_data['SIGLA'] == sigla])
-                    
+                
                 logger.info(f"Contagem para sigla {sigla}: NFSERV={nfserv_count}, R189={r189_count}")
                 
                 # Adiciona contagem para todas as siglas
@@ -571,11 +571,11 @@ class DivergenceReportNFSERVR189:
                         else:
                             # Outras colunas com base no conteúdo
                             max_length = max(
-                                relatorio_final[col].astype(str).apply(len).max(),
+                                    relatorio_final[col].astype(str).apply(len).max(),
                                 len(str(col))
                             )
-                            worksheet.set_column(i, i, max_length + 2)
-            
+                        worksheet.set_column(i, i, max_length + 2)
+                
                 output.seek(0)
                 logger.info("Arquivo Excel criado com sucesso")
                 
