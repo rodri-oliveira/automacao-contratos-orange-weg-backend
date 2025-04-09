@@ -569,7 +569,6 @@ async def get_process_status():
     }
 
 # Manter endpoint para verificar se o serviço está ativo
-# Manter endpoint para verificar se o serviço está ativo
 @router.get("/entrada-status")
 async def get_entrada_status():
     """
