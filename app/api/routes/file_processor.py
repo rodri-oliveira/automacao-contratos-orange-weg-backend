@@ -481,7 +481,7 @@ async def rename_files_in_folder(token, site_url, files_list):
                 result["success"] = True
                 logger.info(f"Arquivo renomeado com sucesso: {original_name} -> {new_name}")
             
-            # FUNÇÃO 2: QPE- com 6 números COM uma letra no final
+            # FUNÇÃO 2: QPE- com 6 números COM letra no final
             elif re.search(r"QPE-\d{6}[A-Za-z]", original_name):
                 result["type"] = "qpe_com_letra"
                 logger.info(f"Arquivo identificado como QPE com letra: {original_name}")
@@ -1662,3 +1662,59 @@ async def create_folder(token, site_url, folder_path):
     except Exception as e:
         logger.error(f"Erro ao criar pasta {folder_path}: {str(e)}")
         return False
+
+@router.get("/check-entrada")
+async def check_entrada_files():
+    """
+    Verifica arquivos presentes na pasta ENTRADA.
+    Útil para diagnosticar problemas e verificar se há arquivos não processados.
+    """
+    try:
+        logger.info("=== VERIFICANDO ARQUIVOS RESTANTES NA PASTA ENTRADA ===")
+        
+        # Autenticar no SharePoint
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        
+        if not token:
+            logger.error("Falha na autenticação com SharePoint")
+            return {"success": False, "message": "Falha na autenticação com SharePoint"}
+            
+        site_url = auth.site_url
+        
+        # Listar arquivos na pasta ENTRADA
+        entrada_files = await list_files(token, site_url, PATHS["ENTRADA"], limit=1000)
+        
+        if not entrada_files:
+            logger.info("Nenhum arquivo encontrado na pasta ENTRADA")
+            return {
+                "success": True, 
+                "message": "Nenhum arquivo encontrado na pasta ENTRADA",
+                "files": []
+            }
+        
+        # Organizar informações dos arquivos
+        files_info = []
+        for file in entrada_files:
+            file_name = file.get("Name", "")
+            file_size = file.get("Length", 0)
+            file_modified = file.get("TimeLastModified", "")
+            
+            files_info.append({
+                "name": file_name,
+                "size": file_size,
+                "modified": file_modified
+            })
+        
+        logger.info(f"Encontrados {len(files_info)} arquivos na pasta ENTRADA")
+        
+        return {
+            "success": True,
+            "message": f"Encontrados {len(files_info)} arquivos na pasta ENTRADA",
+            "total_files": len(files_info),
+            "files": files_info
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao verificar pasta ENTRADA: {str(e)}")
+        return {"success": False, "message": f"Erro: {str(e)}"}
