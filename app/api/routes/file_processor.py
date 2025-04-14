@@ -1297,6 +1297,7 @@ def check_if_cancelled():
 async def rename_files_clean():
     """
     Função limpa que renomeia E move os arquivos de acordo com as regras de negócio.
+    AGORA com suporte a cancelamento.
     
     Regras de renomeação:
     1. QPE- com 6 números SEM letra → Adiciona nome da cidade
@@ -1310,6 +1311,15 @@ async def rename_files_clean():
     - Arquivos com padrão (BLU|POA|VIX|SPB|REC|BHO) + XXXXXXYZ vão para a pasta /NFSERV
     - Arquivos com padrão SPB-XXXXXX (sem letra) vão para a pasta /SPB
     """
+    global process_running, process_cancel_requested # Adicionar controle de processo
+    
+    # Garantir que o processo não está rodando e resetar cancelamento
+    with process_lock:
+        if process_running:
+            return {"success": False, "message": "Outro processo já está em execução."}
+        process_running = True
+        process_cancel_requested = False
+
     try:
         logger.info("=== INICIANDO PROCESSAMENTO COMPLETO: RENOMEAR E MOVER ===")
         
@@ -1326,6 +1336,9 @@ async def rename_files_clean():
         
         if not token:
             logger.error("Falha na autenticação com SharePoint")
+            # Libera o lock antes de retornar
+            with process_lock:
+                process_running = False
             return {"success": False, "message": "Falha na autenticação com SharePoint"}
             
         site_url = auth.site_url
@@ -1335,6 +1348,9 @@ async def rename_files_clean():
         
         if not entrada_files:
             logger.info("Nenhum arquivo encontrado na pasta ENTRADA")
+            # Libera o lock antes de retornar
+            with process_lock:
+                process_running = False
             return {"success": True, "message": "Nenhum arquivo encontrado para processar"}
             
         logger.info(f"Encontrados {len(entrada_files)} arquivos para analisar")
@@ -1354,8 +1370,17 @@ async def rename_files_clean():
         existing_names = set(file.get("Name", "") for file in entrada_files)
         renamed_files = []  # Para armazenar informações sobre arquivos renomeados
         
-        # Processar cada arquivo
+        cancelled = False # Flag local para saber se foi cancelado
+
+        # FASE 1: RENOMEAR NA PASTA ENTRADA
+        logger.info("=== FASE 1: RENOMEANDO ARQUIVOS NA PASTA ENTRADA ===")
         for index, file in enumerate(entrada_files, 1):
+            # <<< VERIFICAÇÃO DE CANCELAMENTO (INÍCIO DO LOOP) >>>
+            if check_if_cancelled():
+                logger.warning(f"[{index}/{len(entrada_files)}] Processo cancelado pelo usuário durante a FASE 1 (Renomear).")
+                cancelled = True
+                break # Sai do loop de renomeação
+
             original_name = file.get("Name", "")
             
             try:
@@ -1379,7 +1404,8 @@ async def rename_files_clean():
                 file_type = None
                 new_name = None
                 destination_folder = None
-                
+                file_content = None # Inicializar
+
                 # REGRA 1: QPE- com 6 números SEM letra
                 if re.search(r"QPE-\d{6}(?![A-Za-z])", original_name):
                     file_type = "qpe_sem_letra"
@@ -1492,9 +1518,17 @@ async def rename_files_clean():
                         "motivo": "não corresponde a nenhum padrão"
                     })
                     continue
-                
-                # Se chegou até aqui, temos um novo nome válido e o arquivo foi baixado com sucesso
-                
+
+                # Verificar se o arquivo foi baixado corretamente antes de prosseguir
+                if file_content is None and file_type is not None:
+                     # Se entramos em alguma regra mas o download falhou (já logado antes), pulamos
+                     continue
+                     
+                # Verificar se o novo nome foi definido (ex: cidade não encontrada)
+                if new_name is None and file_type is not None:
+                    # Se entramos em alguma regra mas não conseguimos gerar o nome, pulamos
+                    continue
+
                 # Verificar se o novo nome já existe (para evitar conflitos)
                 if new_name in existing_names:
                     logger.warning(f"Conflito de nomes: {new_name} já existe na pasta, gerando nome único")
@@ -1554,76 +1588,98 @@ async def rename_files_clean():
         # FASE 2: MOVER OS ARQUIVOS RENOMEADOS PARA AS PASTAS CORRETAS
         logger.info(f"=== FASE 2: MOVENDO {len(renamed_files)} ARQUIVOS PARA DESTINOS ===")
         
-        # Verificar existência das pastas de destino e criar se necessário
-        for file_info in renamed_files:
-            destination = file_info["destination"]
-            try:
-                # Verificar se a pasta existe e criar se necessário
-                folder_exists = await check_folder_exists(token, site_url, destination)
-                if not folder_exists:
-                    logger.info(f"Criando pasta de destino: {destination}")
-                    success = await create_folder(token, site_url, destination)
-                    if not success:
-                        logger.error(f"Falha ao criar pasta {destination}")
-                        results["erros"].append({
-                            "arquivo": file_info["name"],
-                            "erro": f"falha ao criar pasta de destino {destination}"
-                        })
-                        continue
-                
-                # Mover o arquivo
-                file_name = file_info["name"]
-                file_content = file_info["content"]
-                
-                # Fazer upload na pasta de destino
-                success = await upload_file(token, site_url, file_content, file_name, destination)
-                
-                if success:
-                    # Excluir da pasta de entrada
-                    delete_success = await delete_file(token, site_url, PATHS["ENTRADA"], file_name)
+        # Só executa a fase 2 se não foi cancelado na fase 1
+        if not cancelled:
+            for file_info in renamed_files:
+                 # <<< VERIFICAÇÃO DE CANCELAMENTO (INÍCIO DO LOOP) >>>
+                if check_if_cancelled():
+                    logger.warning(f"Processo cancelado pelo usuário durante a FASE 2 (Mover) antes de mover {file_info['name']}.")
+                    cancelled = True
+                    break # Sai do loop de movimentação
+
+                destination = file_info["destination"]
+                try:
+                    # Verificar se a pasta existe e criar se necessário
+                    folder_exists = await check_folder_exists(token, site_url, destination)
+                    if not folder_exists:
+                        logger.info(f"Criando pasta de destino: {destination}")
+                        success = await create_folder(token, site_url, destination)
+                        if not success:
+                            logger.error(f"Falha ao criar pasta {destination}")
+                            results["erros"].append({
+                                "arquivo": file_info["name"],
+                                "erro": f"falha ao criar pasta de destino {destination}"
+                            })
+                            continue
                     
-                    if delete_success:
-                        results["movidos"].append({
-                            "arquivo": file_name,
-                            "destino": destination
-                        })
-                        logger.info(f"Arquivo movido com sucesso: {file_name} -> {destination}")
+                    # Mover o arquivo
+                    file_name = file_info["name"]
+                    file_content = file_info["content"]
+                    
+                    # Fazer upload na pasta de destino
+                    success = await upload_file(token, site_url, file_content, file_name, destination)
+                    
+                    if success:
+                        # Excluir da pasta de entrada
+                        delete_success = await delete_file(token, site_url, PATHS["ENTRADA"], file_name)
+                        
+                        if delete_success:
+                            results["movidos"].append({
+                                "arquivo": file_name,
+                                "destino": destination
+                            })
+                            logger.info(f"Arquivo movido com sucesso: {file_name} -> {destination}")
+                        else:
+                            logger.error(f"Erro ao excluir arquivo da pasta de entrada após mover: {file_name}")
+                            results["erros"].append({
+                                "arquivo": file_name,
+                                "erro": "falha ao excluir da pasta de entrada após mover"
+                            })
                     else:
-                        logger.error(f"Erro ao excluir arquivo da pasta de entrada após mover: {file_name}")
+                        logger.error(f"Erro ao fazer upload do arquivo no destino: {file_name} -> {destination}")
                         results["erros"].append({
                             "arquivo": file_name,
-                            "erro": "falha ao excluir da pasta de entrada após mover"
+                            "erro": f"falha ao fazer upload no destino {destination}"
                         })
-                else:
-                    logger.error(f"Erro ao fazer upload do arquivo no destino: {file_name} -> {destination}")
+                
+                except Exception as e:
+                    logger.exception(f"Erro ao mover arquivo {file_info['name']}")
                     results["erros"].append({
-                        "arquivo": file_name,
-                        "erro": f"falha ao fazer upload no destino {destination}"
+                        "arquivo": file_info["name"],
+                        "erro": f"erro ao mover: {str(e)}"
                     })
-            
-            except Exception as e:
-                logger.exception(f"Erro ao mover arquivo {file_info['name']}")
-                results["erros"].append({
-                    "arquivo": file_info["name"],
-                    "erro": f"erro ao mover: {str(e)}"
-                })
-        
+
         # Calcular totais para relatório
         totais = {key: len(value) for key, value in results.items()}
         total_renomeados = sum(len(results[k]) for k in ["qpe_sem_letra", "qpe_com_letra", "spb_sem_letra", "telecom"])
         total_movidos = len(results["movidos"])
         
+        # Mensagem final baseada no cancelamento
+        final_message = f"Processamento concluído: {total_renomeados} arquivos renomeados, {total_movidos} arquivos movidos"
+        if cancelled:
+            final_message = f"Processo CANCELADO pelo usuário. Resultados parciais: {total_renomeados} arquivos renomeados, {total_movidos} arquivos movidos"
+
         return {
-            "success": True,
-            "mensagem": f"Processamento concluído: {total_renomeados} arquivos renomeados, {total_movidos} arquivos movidos",
+            "success": True, # Retorna sucesso mesmo se cancelado, mas indica no status/mensagem
+            "cancelled": cancelled, # Adiciona flag de cancelamento
+            "message": final_message, # Mensagem ajustada
             "resultados": results,
             "totais": totais,
-            "total_arquivos": len(entrada_files)
+            "total_arquivos_inicial": len(entrada_files) # Renomeado para clareza
         }
 
     except Exception as e:
         logger.exception("Erro geral no processamento")
-        return {"success": False, "message": f"Erro geral: {str(e)}"}
+        # Libera o lock em caso de erro geral
+        with process_lock:
+            process_running = False
+        return {"success": False, "cancelled": False, "message": f"Erro geral: {str(e)}"}
+    finally:
+         # <<< GARANTIR QUE O PROCESSO É MARCADO COMO NÃO RODANDO >>>
+         with process_lock:
+             process_running = False
+             # Não resetamos process_cancel_requested aqui, pois o status pode ser útil
+         logger.info("=== FIM DO PROCESSAMENTO: RENOMEAR E MOVER ===")
 
 # Funções auxiliares para verificar e criar pastas
 async def check_folder_exists(token, site_url, folder_path):
