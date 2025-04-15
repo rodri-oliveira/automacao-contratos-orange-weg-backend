@@ -37,10 +37,16 @@ process_running = False
 process_cancel_requested = False
 process_lock = Lock()
 
+# Variáveis para rastreamento de progresso detalhado
+process_current_stage = ""  # Etapa atual: "rename", "move", etc.
+process_total_files = 0     # Total de arquivos a serem processados
+process_processed_files = 0  # Arquivos já processados
+process_start_time = None    # Hora de início do processamento
+process_stage_details = {}   # Detalhes específicos da etapa atual
+
 # Defina uma variável global para rastrear os arquivos processados em uma sessão
 processed_files_history = set()
 processing_lock = asyncio.Lock()  # Para garantir processamento sincronizado
-
 
 # Função auxiliar para extrair cidade do texto
 def extract_city_from_text(text, pattern):
@@ -825,7 +831,7 @@ async def move_files_to_destinations(token, site_url, files_list):
     # ... resto do código existente ...
 
 @router.post("/move-files")
-async def move_files_to_destinations():
+async def move_files_to_destinations(skip_cleanup: bool = False):
     """
     Move arquivos para suas pastas de destino.
     Agora com suporte para cancelamento.
@@ -838,6 +844,9 @@ async def move_files_to_destinations():
         process_running = True
     
     try:
+        # Definir o tempo de início para calcular a duração total da operação
+        start_time = time.time()
+        
         logger.info("==================== INICIANDO MOVIMENTAÇÃO DE ARQUIVOS ====================")
         logger.info(f"Data/hora de início: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         
@@ -853,60 +862,72 @@ async def move_files_to_destinations():
         site_url = auth.site_url
         logger.info(f"Autenticação bem-sucedida! Site URL: {site_url}")
         
-        # ETAPA 1: LIMPAR PASTAS DE DESTINO (EXCETO R189)
-        logger.info("")
-        logger.info("===== ETAPA 1: LIMPANDO PASTAS DE DESTINO =====")
-        logger.info("IMPORTANTE: A pasta ENTRADA NÃO será limpa, apenas as pastas de destino")
-        logger.info("IMPORTANTE: A pasta R189 NÃO será limpa conforme solicitado!")
-        
-        # Lista de pastas para limpar (todas exceto ENTRADA e R189)
-        destination_folders = ["QPE", "NFSERV", "SPB"]  # Removido R189
+        # ETAPA 1: LIMPAR PASTAS DE DESTINO (EXCETO R189) - OPCIONAL
         cleanup_results = {}
         
-        # Limpar cada pasta de destino
-        for folder_name in destination_folders:
-            folder_path = PATHS[folder_name]
-            logger.info(f"")
-            logger.info(f"LIMPANDO PASTA: {folder_name} (caminho: {folder_path})")
+        # Verificar se deve pular a limpeza das pastas
+        if skip_cleanup:
+            logger.info("")
+            logger.info("===== ETAPA 1: LIMPEZA DE PASTAS IGNORADA (skip_cleanup=True) =====")
+            logger.info("Pulando a limpeza das pastas de destino conforme solicitado.")
             
-            # Listar arquivos na pasta
-            logger.info(f"Listando arquivos em {folder_name}...")
-            folder_files = await list_files(token, site_url, folder_path, limit=1000)
+            # Adicionar resultados vazios para manter a estrutura
+            for folder in ["QPE", "NFSERV", "SPB", "R189"]:
+                cleanup_results[folder] = {"total_files": "N/A", "deleted": 0, "skipped": True}
+        else:
+            logger.info("")
+            logger.info("===== ETAPA 1: LIMPANDO PASTAS DE DESTINO =====")
+            logger.info("IMPORTANTE: A pasta ENTRADA NÃO será limpa, apenas as pastas de destino")
+            logger.info("IMPORTANTE: A pasta R189 NÃO será limpa conforme solicitado!")
             
-            if not folder_files:
-                logger.info(f"Pasta {folder_name} já está vazia! Nada para excluir.")
-                cleanup_results[folder_name] = {"total_files": 0, "deleted": 0}
-                continue
-            
-            # Contagem de arquivos para log
-            total_files = len(folder_files)
-            logger.info(f"ENCONTRADOS {total_files} ARQUIVOS para excluir na pasta {folder_name}")
-            
-            # Excluir cada arquivo
-            deleted_count = 0
-            for file in folder_files:
-                file_name = file.get("Name", "")
-                logger.info(f"Excluindo: {file_name}")
-                
-                success = await delete_file(token, site_url, folder_path, file_name)
-                
-                if success:
-                    deleted_count += 1
-                    logger.info(f"✓ Arquivo {file_name} excluído com sucesso")
-                else:
-                    logger.error(f"✗ ERRO ao excluir arquivo: {file_name}")
-            
-            # Registrar resultados
-            cleanup_results[folder_name] = {
-                "total_files": total_files,
-                "deleted": deleted_count,
-                "path": folder_path
-            }
-            
-            logger.info(f"RESULTADO LIMPEZA {folder_name}: {deleted_count}/{total_files} arquivos excluídos")
+            # Lista de pastas para limpar (todas exceto ENTRADA e R189)
+            destination_folders = ["QPE", "NFSERV", "SPB"]  # Removido R189
         
-        # Adicionar R189 como "preservada" no resultado
-        cleanup_results["R189"] = {"total_files": "N/A", "deleted": 0, "preservada": True}
+        # Limpar cada pasta de destino (apenas se skip_cleanup=False)
+        if not skip_cleanup:
+            for folder_name in destination_folders:
+                folder_path = PATHS[folder_name]
+                logger.info(f"")
+                logger.info(f"LIMPANDO PASTA: {folder_name} (caminho: {folder_path})")
+                
+                # Listar arquivos na pasta
+                logger.info(f"Listando arquivos em {folder_name}...")
+                folder_files = await list_files(token, site_url, folder_path, limit=1000)
+                
+                if not folder_files:
+                    logger.info(f"Pasta {folder_name} já está vazia! Nada para excluir.")
+                    cleanup_results[folder_name] = {"total_files": 0, "deleted": 0}
+                    continue
+                
+                # Contagem de arquivos para log
+                total_files = len(folder_files)
+                logger.info(f"ENCONTRADOS {total_files} ARQUIVOS para excluir na pasta {folder_name}")
+                
+                # Excluir cada arquivo
+                deleted_count = 0
+                for file in folder_files:
+                    file_name = file.get("Name", "")
+                    logger.info(f"Excluindo: {file_name}")
+                    
+                    success = await delete_file(token, site_url, folder_path, file_name)
+                    
+                    if success:
+                        deleted_count += 1
+                        logger.info(f"✓ Arquivo {file_name} excluído com sucesso")
+                    else:
+                        logger.error(f"✗ ERRO ao excluir arquivo: {file_name}")
+                
+                # Registrar resultados
+                cleanup_results[folder_name] = {
+                    "total_files": total_files,
+                    "deleted": deleted_count,
+                    "path": folder_path
+                }
+                
+                logger.info(f"RESULTADO LIMPEZA {folder_name}: {deleted_count}/{total_files} arquivos excluídos")
+            
+            # Adicionar R189 como "preservada" no resultado
+            cleanup_results["R189"] = {"total_files": "N/A", "deleted": 0, "preservada": True}
         
         logger.info("")
         logger.info("LIMPEZA DAS PASTAS DE DESTINO CONCLUÍDA!")
@@ -1017,8 +1038,14 @@ async def move_files_to_destinations():
                     continue
                 logger.info(f"Upload concluído com sucesso")
                 
-                # MUDANÇA: NÃO excluir o arquivo original como solicitado
-                logger.info(f"✓ Arquivo mantido na pasta ENTRADA conforme solicitado")
+                # MUDANÇA: Excluir o arquivo original após copiar para evitar loops
+                logger.info(f"Excluindo arquivo da pasta ENTRADA após copiá-lo...")
+                delete_success = await delete_file(token, site_url, PATHS["ENTRADA"], file_name)
+                
+                if delete_success:
+                    logger.info(f"✓ Arquivo removido da pasta ENTRADA após cópia")
+                else:
+                    logger.warning(f"⚠ Não foi possível excluir o arquivo da pasta ENTRADA")
                 
                 # Adicionar à lista de arquivos movidos
                 moved_files.append({
@@ -1027,7 +1054,7 @@ async def move_files_to_destinations():
                     "destination_name": destination_name
                 })
                 
-                logger.info(f"✓ SUCESSO! Arquivo {file_name} copiado para {destination_name} (original mantido)")
+                logger.info(f"✓ SUCESSO! Arquivo {file_name} movido para {destination_name}")
             
             except Exception as e:
                 logger.error(f"✗ ERRO AO PROCESSAR ARQUIVO {file_name}: {str(e)}")
@@ -1051,13 +1078,13 @@ async def move_files_to_destinations():
         logger.info(f"Arquivos não movidos: {not_moved}")
         logger.info(f"Tempo total de execução: {total_time} segundos")
         logger.info("")
-        logger.info(f"ARQUIVOS COPIADOS POR PASTA:")
+        logger.info(f"ARQUIVOS MOVIDOS POR PASTA:")
         logger.info(f"  • QPE: {moved_to_qpe} arquivos")
         logger.info(f"  • NFSERV: {moved_to_nfserv} arquivos")
         logger.info(f"  • SPB: {moved_to_spb} arquivos")
         logger.info(f"  • R189: {moved_to_r189} arquivos")
         logger.info("")
-        logger.info(f"IMPORTANTE: Todos os arquivos originais foram MANTIDOS na pasta ENTRADA")
+        logger.info("IMPORTANTE: Todos os arquivos foram MOVIDOS da pasta ENTRADA para suas respectivas pastas de destino")
         
         if not_moved > 0:
             logger.warning("")
@@ -1274,17 +1301,79 @@ async def cancel_process():
 @router.get("/process-status")
 async def get_process_status():
     """
-    Retorna o status atual do processo (em execução ou não).
+    Retorna o status atual do processo com informações detalhadas sobre o progresso.
+    
+    Retorna:
+        dict: Informações detalhadas sobre o status atual do processamento, incluindo:
+            - running: Se o processo está em execução
+            - cancel_requested: Se foi solicitado cancelamento
+            - stage: Etapa atual do processamento
+            - progress: Porcentagem de conclusão (0-100)
+            - files_total: Número total de arquivos a processar
+            - files_processed: Número de arquivos já processados
+            - elapsed_time: Tempo decorrido em segundos
+            - details: Detalhes específicos da etapa atual
     """
     global process_running, process_cancel_requested
+    global process_current_stage, process_total_files, process_processed_files, process_start_time, process_stage_details
     
     with process_lock:
+        # Cálculo de progresso e tempo decorrido
+        progress = 0
+        elapsed_time = 0
+        
+        if process_total_files > 0:
+            progress = min(100, int((process_processed_files / process_total_files) * 100))
+        
+        if process_start_time:
+            elapsed_time = round(time.time() - process_start_time, 2)
+        
         status = {
             "running": process_running,
-            "cancel_requested": process_cancel_requested
+            "cancel_requested": process_cancel_requested,
+            "stage": process_current_stage,
+            "progress": progress,
+            "files_total": process_total_files,
+            "files_processed": process_processed_files,
+            "elapsed_time": elapsed_time,
+            "details": process_stage_details
         }
     
     return status
+
+# Função auxiliar para atualizar o status do processo
+def update_process_status(stage=None, total_files=None, processed_files=None, details=None):
+    """
+    Atualiza o status atual do processo.
+    
+    Args:
+        stage (str, optional): Etapa atual do processamento ("rename", "move", etc.)
+        total_files (int, optional): Número total de arquivos a processar
+        processed_files (int, optional): Número de arquivos já processados
+        details (dict, optional): Detalhes específicos da etapa atual
+    """
+    global process_current_stage, process_total_files, process_processed_files, process_start_time, process_stage_details
+    
+    with process_lock:
+        # Inicializar o tempo de início se não estiver definido e o processo estiver iniciando
+        if stage and not process_current_stage and not process_start_time:
+            process_start_time = time.time()
+        
+        # Atualizar os valores fornecidos
+        if stage is not None:
+            process_current_stage = stage
+        
+        if total_files is not None:
+            process_total_files = total_files
+        
+        if processed_files is not None:
+            process_processed_files = processed_files
+        elif processed_files is None and total_files is not None:
+            # Se total_files foi atualizado mas processed_files não, resetar processed_files
+            process_processed_files = 0
+        
+        if details is not None:
+            process_stage_details = details
 
 # Adicione esta função auxiliar para verificar cancelamento
 def check_if_cancelled():
@@ -1324,11 +1413,20 @@ async def rename_files_clean():
         logger.info("=== INICIANDO PROCESSAMENTO COMPLETO: RENOMEAR E MOVER ===")
         
         # Limpar cache e histórico antes de iniciar
-        global processed_files_history
+        global processed_files_history, process_start_time
         if 'processed_files_history' not in globals():
             processed_files_history = set()
         else:
             processed_files_history.clear()
+        
+        # Inicializar variáveis de progresso
+        process_start_time = time.time()
+        update_process_status(
+            stage="iniciando",
+            total_files=0,
+            processed_files=0,
+            details={"status": "Autenticando no SharePoint"}
+        )
         
         # Autenticar no SharePoint
         auth = SharePointAuth()
@@ -1343,17 +1441,42 @@ async def rename_files_clean():
             
         site_url = auth.site_url
         
+        # Atualizar status para indicar que está listando arquivos
+        update_process_status(
+            stage="listando",
+            details={"status": "Listando arquivos na pasta ENTRADA"}
+        )
+        
         # Listar TODOS os arquivos da pasta ENTRADA
         entrada_files = await list_files(token, site_url, PATHS["ENTRADA"], limit=1000)
         
         if not entrada_files:
             logger.info("Nenhum arquivo encontrado na pasta ENTRADA")
+            # Atualizar status antes de liberar o lock
+            update_process_status(
+                stage="concluído",
+                total_files=0,
+                processed_files=0,
+                details={"status": "Nenhum arquivo encontrado para processar"}
+            )
             # Libera o lock antes de retornar
             with process_lock:
                 process_running = False
             return {"success": True, "message": "Nenhum arquivo encontrado para processar"}
             
-        logger.info(f"Encontrados {len(entrada_files)} arquivos para analisar")
+        total_files = len(entrada_files)
+        logger.info(f"Encontrados {total_files} arquivos para analisar")
+        
+        # Atualizar status com o número total de arquivos
+        update_process_status(
+            stage="renomeando",
+            total_files=total_files,
+            processed_files=0,
+            details={
+                "status": "Iniciando renomeação de arquivos",
+                "total_files": total_files
+            }
+        )
         
         # Resultados organizados por categoria
         results = {
@@ -1378,6 +1501,15 @@ async def rename_files_clean():
             # <<< VERIFICAÇÃO DE CANCELAMENTO (INÍCIO DO LOOP) >>>
             if check_if_cancelled():
                 logger.warning(f"[{index}/{len(entrada_files)}] Processo cancelado pelo usuário durante a FASE 1 (Renomear).")
+                # Atualizar status para indicar cancelamento
+                update_process_status(
+                    stage="cancelado",
+                    processed_files=index-1,
+                    details={
+                        "status": "Processo cancelado pelo usuário durante a renomeação",
+                        "arquivos_processados": index-1
+                    }
+                )
                 cancelled = True
                 break # Sai do loop de renomeação
 
@@ -1385,6 +1517,15 @@ async def rename_files_clean():
             
             try:
                 logger.info(f"[{index}/{len(entrada_files)}] Processando: {original_name}")
+                
+                # Atualizar status de progresso para o arquivo atual
+                update_process_status(
+                    processed_files=index-1,
+                    details={
+                        "status": f"Processando arquivo {index}/{total_files}",
+                        "arquivo_atual": original_name
+                    }
+                )
                 
                 # VERIFICAÇÃO RIGOROSA DE ARQUIVOS JÁ PROCESSADOS
                 # Caso 1: Verificar se o arquivo já foi processado nesta sessão
@@ -1588,6 +1729,17 @@ async def rename_files_clean():
         # FASE 2: MOVER OS ARQUIVOS RENOMEADOS PARA AS PASTAS CORRETAS
         logger.info(f"=== FASE 2: MOVENDO {len(renamed_files)} ARQUIVOS PARA DESTINOS ===")
         
+        # Atualizar status para a fase de movimentação
+        update_process_status(
+            stage="movendo",
+            total_files=len(renamed_files),
+            processed_files=0,
+            details={
+                "status": f"Movendo {len(renamed_files)} arquivos para pastas de destino",
+                "arquivos_renomeados": len(renamed_files)
+            }
+        )
+        
         # Só executa a fase 2 se não foi cancelado na fase 1
         if not cancelled:
             for file_info in renamed_files:
@@ -1724,6 +1876,11 @@ async def check_entrada_files():
     """
     Verifica arquivos presentes na pasta ENTRADA.
     Útil para diagnosticar problemas e verificar se há arquivos não processados.
+    
+    Após a chamada do /rename-clean:
+    1. Verifica se existem arquivos na pasta /ENTRADA
+    2. Se existirem, primeiro verifica se há arquivos não renomeados e renomeá-los
+    3. Depois que todos os arquivos forem renomeados, move os arquivos restantes
     """
     try:
         logger.info("=== VERIFICANDO ARQUIVOS RESTANTES NA PASTA ENTRADA ===")
@@ -1762,13 +1919,155 @@ async def check_entrada_files():
                 "modified": file_modified
             })
         
-        logger.info(f"Encontrados {len(files_info)} arquivos na pasta ENTRADA")
+        # Classificar arquivos entre renomeados e não renomeados
+        renamed_files = []
+        non_renamed_files = []
         
+        for file_info in files_info:
+            file_name = file_info["name"]
+            
+            # Verificar se o arquivo já foi renomeado
+            # Para arquivos com "nfserv_", verificar se tem prefixo
+            if "nfserv_" in file_name:
+                # Se "nfserv_" não está no início do nome, significa que tem um prefixo (foi renomeado)
+                if not file_name.startswith("nfserv_"):
+                    renamed_files.append(file_info)
+                    continue
+            
+            # Se chegou aqui, é um arquivo não renomeado
+            non_renamed_files.append(file_info)
+        
+        logger.info(f"Encontrados {len(files_info)} arquivos na pasta ENTRADA")
+        logger.info(f"  - {len(renamed_files)} arquivos já renomeados")
+        logger.info(f"  - {len(non_renamed_files)} arquivos não renomeados")
+        
+        # LÓGICA PARA VERIFICAR E PROCESSAR ARQUIVOS APÓS RENAME-CLEAN
+        # Verificar se há arquivos não renomeados e renomeá-los
+        if len(non_renamed_files) > 0:
+            logger.info("Encontrados arquivos não renomeados. Executando rename-clean...")
+            
+            # Chamar rename-clean para processar os arquivos não renomeados
+            try:
+                rename_result = await rename_files_clean()
+                
+                if not rename_result.get("success", False):
+                    logger.error("Falha ao renomear arquivos restantes")
+                    return {
+                        "success": False,
+                        "message": "Falha ao renomear arquivos restantes",
+                        "details": rename_result,
+                        "files": files_info,
+                        "renamed_files": renamed_files,
+                        "non_renamed_files": non_renamed_files
+                    }
+                
+                # Verificar novamente após renomear
+                # Listar arquivos na pasta ENTRADA novamente
+                entrada_files_after = await list_files(token, site_url, PATHS["ENTRADA"], limit=1000)
+                
+                # Verificar se ainda existem arquivos não renomeados
+                has_non_renamed = False
+                for file in entrada_files_after:
+                    file_name = file.get("Name", "")
+                    
+                    # Verificar usando a mesma lógica simplificada
+                    is_renamed = False
+                    
+                    # Para arquivos com "nfserv_", verificar se tem prefixo
+                    if "nfserv_" in file_name and not file_name.startswith("nfserv_"):
+                        is_renamed = True
+                    
+                    # Se não foi renomeado, marca flag e interrompe
+                    if not is_renamed:
+                        has_non_renamed = True
+                        break
+                
+                if has_non_renamed:
+                    logger.warning("Ainda existem arquivos não renomeados após rename-clean")
+                    return {
+                        "success": False,
+                        "message": "Ainda existem arquivos não renomeados após rename-clean",
+                        "files": files_info,
+                        "renamed_files": renamed_files,
+                        "non_renamed_files": non_renamed_files,
+                        "rename_result": rename_result
+                    }
+                
+                # Todos os arquivos foram renomeados, agora podemos movê-los
+                logger.info("Todos os arquivos foram renomeados. Movendo para pastas de destino...")
+                
+                # Mover arquivos para pastas de destino sem limpar as pastas (skip_cleanup=True)
+                # Isso evita que as pastas sejam limpas durante retentativas
+                move_result = await move_files_to_destinations(skip_cleanup=True)
+                
+                if not move_result.get("success", False):
+                    logger.error("Falha ao mover arquivos para pastas de destino")
+                    return {
+                        "success": False,
+                        "message": "Falha ao mover arquivos para pastas de destino",
+                        "details": move_result,
+                        "rename_result": rename_result
+                    }
+                
+                return {
+                    "success": True,
+                    "message": "Arquivos verificados, renomeados e movidos com sucesso",
+                    "initial_files": files_info,
+                    "rename_result": rename_result,
+                    "move_result": move_result
+                }
+                
+            except Exception as e:
+                logger.exception("Erro ao processar arquivos não renomeados")
+                return {
+                    "success": False,
+                    "message": f"Erro ao processar arquivos não renomeados: {str(e)}",
+                    "files": files_info,
+                    "renamed_files": renamed_files,
+                    "non_renamed_files": non_renamed_files
+                }
+        elif len(renamed_files) > 0:
+            # Se todos os arquivos já estão renomeados, mover para pastas de destino
+            logger.info("Todos os arquivos já estão renomeados. Movendo para pastas de destino...")
+            
+            try:
+                # Mover arquivos para pastas de destino sem limpar as pastas (skip_cleanup=True)
+                # Isso evita que as pastas sejam limpas durante retentativas
+                move_result = await move_files_to_destinations(skip_cleanup=True)
+                
+                if not move_result.get("success", False):
+                    logger.error("Falha ao mover arquivos para pastas de destino")
+                    return {
+                        "success": False,
+                        "message": "Falha ao mover arquivos para pastas de destino",
+                        "details": move_result,
+                        "files": files_info
+                    }
+                
+                return {
+                    "success": True,
+                    "message": "Todos os arquivos já estavam renomeados e foram movidos com sucesso",
+                    "files": files_info,
+                    "move_result": move_result
+                }
+                
+            except Exception as e:
+                logger.exception("Erro ao mover arquivos renomeados")
+                return {
+                    "success": False,
+                    "message": f"Erro ao mover arquivos renomeados: {str(e)}",
+                    "files": files_info
+                }
+        
+        # Retorno padrão se não houver arquivos para processar
         return {
             "success": True,
             "message": f"Encontrados {len(files_info)} arquivos na pasta ENTRADA",
             "total_files": len(files_info),
-            "files": files_info
+            "files": files_info,
+            "renamed_files": renamed_files,
+            "non_renamed_files": non_renamed_files,
+            "has_non_renamed": len(non_renamed_files) > 0
         }
         
     except Exception as e:
