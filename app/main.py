@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import r189, qpe, spb, nfserv, municipality_code, validation, file_processor, file_repository
+from app.api.routes import r189, qpe, spb, nfserv, municipality_code, validation, file_processor, file_repository, orange_email
 
 app = FastAPI(
     title="Automação Finanças API",
@@ -27,3 +27,5 @@ app.include_router(validation.router, prefix="/backend/validations", tags=["Vali
 app.include_router(file_processor.router, prefix="/backend/files", tags=["File Processor"])
 # Corrigir o prefixo - usando /backend apenas, pois o router já tem prefixo interno "/files-repository"
 app.include_router(file_repository.router, prefix="/backend", tags=["File Repository"])
+# Adicionar o novo router para emails do Orange
+app.include_router(orange_email.router, prefix="/backend", tags=["Orange Emails"])
