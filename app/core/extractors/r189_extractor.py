@@ -118,15 +118,28 @@ class R189Extractor:
                 'CNPJ - WEG',
                 'Invoice number',
                 'Site Name - WEG 2',
-                'Total Geral',
                 'Account number',
                 'Invoice Type'  # Adicionamos a nova coluna aqui
             ]
             
-            # Verifica se todas as colunas necessárias existem
+            # Verifica se as colunas básicas existem
             colunas_faltantes = [col for col in colunas_necessarias if col not in df_consolidado.columns]
             if colunas_faltantes:
                 raise ValueError(f"Colunas faltantes no arquivo Excel: {colunas_faltantes}")
+                
+            # Verifica se existe 'Total Geral' ou 'Grand Total' e padroniza o nome
+            if 'Total Geral' in df_consolidado.columns:
+                coluna_total = 'Total Geral'
+            elif 'Grand Total' in df_consolidado.columns:
+                coluna_total = 'Grand Total'
+                # Renomeia para manter compatibilidade com o restante do código
+                df_consolidado.rename(columns={'Grand Total': 'Total Geral'}, inplace=True)
+                coluna_total = 'Total Geral'
+            else:
+                raise ValueError("Colunas faltantes no arquivo Excel: ['Total Geral' ou 'Grand Total']")
+                
+            # Adiciona a coluna de total à lista de colunas necessárias
+            colunas_necessarias.append('Total Geral')
             
             # Seleciona apenas as colunas necessárias
             df_resultado = df_consolidado[colunas_necessarias].copy()

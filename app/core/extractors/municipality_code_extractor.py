@@ -63,20 +63,33 @@ class MunicipalityCodeExtractor:
             
             df_brasil = df['BRASIL']
 
-            # Colunas necessárias
+            # Colunas necessárias básicas
             colunas_necessarias = [
                 'CNPJ - WEG',
                 'Invoice number',
                 'Municipality Code',
                 'Invoice Type',
-                'Site Name - WEG 2',
-                'Total Geral'
+                'Site Name - WEG 2'
             ]
             
-            # Validação das colunas
+            # Validação das colunas básicas
             colunas_faltantes = [col for col in colunas_necessarias if col not in df_brasil.columns]
             if colunas_faltantes:
                 raise ValueError(f"Colunas faltantes: {colunas_faltantes}")
+                
+            # Verifica se existe 'Total Geral' ou 'Grand Total' e padroniza o nome
+            if 'Total Geral' in df_brasil.columns:
+                coluna_total = 'Total Geral'
+            elif 'Grand Total' in df_brasil.columns:
+                coluna_total = 'Grand Total'
+                # Renomeia para manter compatibilidade com o restante do código
+                df_brasil.rename(columns={'Grand Total': 'Total Geral'}, inplace=True)
+                coluna_total = 'Total Geral'
+            else:
+                raise ValueError("Colunas faltantes: ['Total Geral' ou 'Grand Total']")
+                
+            # Adiciona a coluna de total à lista de colunas necessárias
+            colunas_necessarias.append('Total Geral')
             
             df_consolidado = df_brasil[colunas_necessarias].copy()
 
