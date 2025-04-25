@@ -32,6 +32,15 @@ class ReportMunCodeR189Simple:
             "1.03": {"material": "80001680", "type": "Processamento e Armazenamento"}
         }
         
+        # Mapeamento de Municipality Code para Cód. Fornecedor Orange
+        self.cod_fornc_mapping = {
+            "1.03": 128791, 1.03: 128791,
+            "1.07": 128791, 1.07: 128791,
+            "14.02": 128791, 14.02: 128791,
+            "17.01": 128791, 17.01: 128791,
+            "3115": 17553, 3115.0: 17553, 3115: 17553
+        }
+        
         self.service_cnpj_mapping = {
             "14.02 - Assistência Técnica": {
                 "14.759.173/0002-83", "07.175.725/0042-38", "07.175.725/0014-84",
@@ -144,6 +153,11 @@ class ReportMunCodeR189Simple:
         Versão simplificada que não requer dados de QPE e SPB.
         """
         try:
+            # Adiciona coluna COD_FORNC (Cód. Fornecedor Orange)
+            # Mapeia Municipality Code para fornecedor com chaves numéricas e string
+            mun_code_data['COD_FORNC'] = mun_code_data['Municipality Code'].map(self.cod_fornc_mapping)
+            logger.info("Coluna COD_FORNC adicionada ao mun_code_data")
+            
             # Verifica qual coluna de total está presente no DataFrame
             coluna_total = None
             for col in self.colunas_total:
@@ -179,6 +193,9 @@ class ReportMunCodeR189Simple:
             grouped_data = grouped_data.sort_values(
                 by=['Municipality Code', 'CNPJ - WEG', 'Invoice number']
             )
+            
+            # Adiciona coluna COD_FORNC ao grouped_data
+            grouped_data['COD_FORNC'] = grouped_data['Municipality Code'].map(self.cod_fornc_mapping)
             
             # Aplica o mapeamento para criar as novas colunas
             def get_material_and_type(row):
@@ -226,6 +243,7 @@ class ReportMunCodeR189Simple:
                 grouped_data = grouped_data.reindex(columns=[
                     'CNPJ - WEG',
                     'Municipality Code',
+                    'COD_FORNC',
                     'MATERIAL',
                     'Invoice_Type',
                     'Site Name - WEG 2',
