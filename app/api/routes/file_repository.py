@@ -18,7 +18,8 @@ from app.api.routes.file_processor import (
     list_files, 
     download_file, 
     check_folder_exists, 
-    create_folder
+    create_folder,
+    delete_file
 )
 
 # Configuração de logging
@@ -313,9 +314,10 @@ async def copy_files_to_repository(clean_folders: bool = True):
                     }
                     
                 file_name = file.get("Name")
+                file_name_upper = file_name.upper()
                 
-                # Critério 1: QPE-\d{6}[A-Za-z] -> CADASTRAR
-                if re.search(r"QPE-\d{6}[A-Za-z]", file_name, re.IGNORECASE) and dest_folders.get("CADASTRAR"):
+                # Critério 1: QPE-<6 dígitos><letra> -> CADASTRAR (case-insensitive)
+                if re.search(r"QPE-\d{6}[A-Z]", file_name_upper) and dest_folders.get("CADASTRAR"):
                     logger.info(f"[REPOSITORY] Arquivo {file_name} corresponde ao critério para CADASTRAR")
                     
                     # Usar o caminho final com estrutura de ano/ano.mês
@@ -332,10 +334,10 @@ async def copy_files_to_repository(clean_folders: bool = True):
                         failed_files += 1
                     continue
                 
-                # Critério 2: cidade + \d{6}[A-Za-z]\d{2} -> ESCRITURAR
+                # Critério 2: código de cidade + <6 dígitos><letra><2 dígitos> -> ESCRITURAR
                 cities = ["BLU", "POA", "VIX", "SPB", "REC", "BHO"]
-                has_city = any(city in file_name for city in cities)
-                has_pattern = re.search(r"\d{6}[A-Za-z]\d{2}", file_name, re.IGNORECASE) is not None
+                has_city = any(city in file_name_upper for city in cities)
+                has_pattern = re.search(r"\d{6}[A-Z]\d{2}", file_name_upper) is not None
                 
                 if has_city and has_pattern and dest_folders.get("ESCRITURAR"):
                     logger.info(f"[REPOSITORY] Arquivo {file_name} corresponde ao critério para ESCRITURAR")
@@ -658,6 +660,141 @@ async def test_simple_upload():
         logger.error(traceback.format_exc())
         return {"success": False, "error": str(e)}
 
+@router.get("/test-curl-exact")
+async def test_curl_exact():
+    """
+    Implementação exata do comando curl que funcionou, com logs detalhados
+    """
+    try:
+        # Obter autenticação
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        site_url = auth.site_url
+        
+        if not token:
+            return {"success": False, "error": "Falha ao obter token"}
+        
+        # Logs para verificar o token e site_url
+        logger.info(f"[CURL-EXACT] Token obtido (primeiros 20 caracteres): {token[:20]}...")
+        logger.info(f"[CURL-EXACT] Site URL: {site_url}")
+        logger.info(f"[CURL-EXACT] URL base do Contratos: {SHAREPOINT_CONTRATOS_BASE_URL}")
+        
+        # Usar exatamente o mesmo caminho do curl
+        folder_path = "/teams/BR-TI-TIN/contratos/Telecom/Repositório_Faturas_Auto_Orange/Cadastrar"
+        test_filename = f"teste_curl_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
+        
+        # Criar um arquivo de teste simples
+        test_content = f"Teste exato de curl - {datetime.now()}".encode('utf-8')
+        
+        # Construir a URL usando nossa constante global
+        url = f"{SHAREPOINT_CONTRATOS_BASE_URL}/_api/web/GetFolderByServerRelativeUrl('{folder_path}')/Files/add(overwrite=true,url='{test_filename}')"
+        
+        logger.info(f"[CURL-EXACT] URL construída: {url}")
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/octet-stream",
+            "Accept": "application/json;odata=verbose"
+        }
+        
+        logger.info(f"[CURL-EXACT] Headers: {headers}")
+        
+        # Fazer o upload com tratamento de erros melhorado
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, 
+                lambda: requests.post(url, headers=headers, data=test_content, timeout=60)
+            )
+            
+            logger.info(f"[CURL-EXACT] Status code: {response.status_code}")
+            logger.info(f"[CURL-EXACT] Resposta: {response.text[:500]}...")
+            
+            success = response.status_code in [200, 201]
+            
+            return {
+                "success": success,
+                "status_code": response.status_code,
+                "path": folder_path,
+                "filename": test_filename,
+                "timestamp": str(datetime.now()),
+                "response_snippet": response.text[:200] if response.text else None
+            }
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[CURL-EXACT] Erro de conexão: {str(e)}")
+            return {"success": False, "error": f"Erro de conexão: {str(e)}"}
+        except requests.exceptions.Timeout as e:
+            logger.error(f"[CURL-EXACT] Timeout na requisição: {str(e)}")
+            return {"success": False, "error": f"Timeout na requisição: {str(e)}"}
+        except Exception as e:
+            logger.error(f"[CURL-EXACT] Erro: {str(e)}")
+            return {"success": False, "error": f"Erro genérico: {str(e)}"}
+            
+    except Exception as e:
+        logger.error(f"[CURL-EXACT] Erro: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
+
+async def upload_file_to_repository(token, file_content, file_name, destination_path):
+    """
+    Função de upload que usa diretamente a URL que sabemos que funciona.
+    Esta função substitui a chamada para 'upload_file' em copy_file_to_repository.
+    """
+    try:
+        # IMPORTANTE: Usar a URL base correta da constante global
+        encoded_file_name = urllib.parse.quote(file_name)
+        
+        # Construir URL usando a constante global
+        upload_url = f"{SHAREPOINT_CONTRATOS_BASE_URL}/_api/web/GetFolderByServerRelativeUrl('{destination_path}')/Files/add(overwrite=true,url='{encoded_file_name}')"
+        
+        logger.info(f"[UPLOAD_REPO] URL completa: {upload_url}")
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/octet-stream",
+            "Accept": "application/json;odata=verbose"
+        }
+        
+        # Se file_content é BytesIO, precisamos obter os bytes reais
+        if isinstance(file_content, BytesIO):
+            file_content.seek(0)
+            content = file_content.read()
+        else:
+            content = file_content
+        
+        # Fazer o request com requests (síncrono mas dentro de async function)
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, 
+                lambda: requests.post(upload_url, headers=headers, data=content, timeout=60)
+            )
+            
+            logger.info(f"[UPLOAD_REPO] Status: {response.status_code}")
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"[UPLOAD_REPO] Arquivo {file_name} enviado com sucesso para {destination_path}")
+                return True
+            else:
+                logger.error(f"[UPLOAD_REPO] Falha ao enviar arquivo {file_name}: {response.status_code}")
+                logger.error(f"[UPLOAD_REPO] Resposta: {response.text}")
+                return False
+                
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[UPLOAD_REPO] Erro de conexão ao enviar {file_name}: {str(e)}")
+            return False
+        except requests.exceptions.Timeout as e:
+            logger.error(f"[UPLOAD_REPO] Timeout ao enviar {file_name}: {str(e)}")
+            return False
+        except Exception as e:
+            logger.error(f"[UPLOAD_REPO] Erro ao enviar {file_name}: {str(e)}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"[UPLOAD_REPO] Exceção ao fazer upload: {str(e)}")
+        logger.error(traceback.format_exc())
+        return False
+
 @router.post("/cancel-process")
 async def cancel_process():
     """
@@ -767,274 +904,6 @@ async def test_url_formation():
         logger.error(f"[URL TEST] Erro: {str(e)}")
         logger.error(traceback.format_exc())
         return {"success": False, "error": str(e)}
-
-@router.get("/test-curl-exact")
-async def test_curl_exact():
-    """
-    Implementação exata do comando curl que funcionou, com logs detalhados
-    """
-    try:
-        # Obter autenticação
-        auth = SharePointAuth()
-        token = auth.acquire_token()
-        site_url = auth.site_url
-        
-        if not token:
-            return {"success": False, "error": "Falha ao obter token"}
-        
-        # Logs para verificar o token e site_url
-        logger.info(f"[CURL-EXACT] Token obtido (primeiros 20 caracteres): {token[:20]}...")
-        logger.info(f"[CURL-EXACT] Site URL: {site_url}")
-        logger.info(f"[CURL-EXACT] URL base do Contratos: {SHAREPOINT_CONTRATOS_BASE_URL}")
-        
-        # Usar exatamente o mesmo caminho do curl
-        folder_path = "/teams/BR-TI-TIN/contratos/Telecom/Repositório_Faturas_Auto_Orange/Cadastrar"
-        test_filename = f"teste_curl_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
-        
-        # Criar um arquivo de teste simples
-        test_content = f"Teste exato de curl - {datetime.now()}".encode('utf-8')
-        
-        # Construir a URL usando nossa constante global
-        url = f"{SHAREPOINT_CONTRATOS_BASE_URL}/_api/web/GetFolderByServerRelativeUrl('{folder_path}')/Files/add(overwrite=true,url='{test_filename}')"
-        
-        logger.info(f"[CURL-EXACT] URL construída: {url}")
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/octet-stream",
-            "Accept": "application/json;odata=verbose"
-        }
-        
-        logger.info(f"[CURL-EXACT] Headers: {headers}")
-        
-        # Fazer o upload com tratamento de erros melhorado
-        try:
-            response = requests.post(url, headers=headers, data=test_content, timeout=60)
-            
-            logger.info(f"[CURL-EXACT] Status code: {response.status_code}")
-            logger.info(f"[CURL-EXACT] Resposta: {response.text[:500]}...")
-            
-            success = response.status_code in [200, 201]
-            
-            return {
-                "success": success,
-                "status_code": response.status_code,
-                "path": folder_path,
-                "filename": test_filename,
-                "timestamp": str(datetime.now()),
-                "response_snippet": response.text[:200] if response.text else None
-            }
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"[CURL-EXACT] Erro de conexão: {str(e)}")
-            return {"success": False, "error": f"Erro de conexão: {str(e)}"}
-        except requests.exceptions.Timeout as e:
-            logger.error(f"[CURL-EXACT] Timeout na requisição: {str(e)}")
-            return {"success": False, "error": f"Timeout na requisição: {str(e)}"}
-        except Exception as e:
-            logger.error(f"[CURL-EXACT] Erro: {str(e)}")
-            return {"success": False, "error": f"Erro genérico: {str(e)}"}
-            
-    except Exception as e:
-        logger.error(f"[CURL-EXACT] Erro: {str(e)}")
-        logger.error(traceback.format_exc())
-        return {"success": False, "error": str(e)}
-
-async def upload_file_to_repository(token, file_content, file_name, destination_path):
-    """
-    Função de upload que usa diretamente a URL que sabemos que funciona.
-    Esta função substitui a chamada para 'upload_file' em copy_file_to_repository.
-    """
-    try:
-        # IMPORTANTE: Usar a URL base correta da constante global
-        encoded_file_name = urllib.parse.quote(file_name)
-        
-        # Construir URL usando a constante global
-        upload_url = f"{SHAREPOINT_CONTRATOS_BASE_URL}/_api/web/GetFolderByServerRelativeUrl('{destination_path}')/Files/add(overwrite=true,url='{encoded_file_name}')"
-        
-        logger.info(f"[UPLOAD_REPO] URL completa: {upload_url}")
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/octet-stream",
-            "Accept": "application/json;odata=verbose"
-        }
-        
-        # Se file_content é BytesIO, precisamos obter os bytes reais
-        if isinstance(file_content, BytesIO):
-            file_content.seek(0)
-            content = file_content.read()
-        else:
-            content = file_content
-        
-        # Fazer o request com requests (síncrono mas dentro de async function)
-        try:
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, 
-                lambda: requests.post(upload_url, headers=headers, data=content, timeout=60)
-            )
-            
-            logger.info(f"[UPLOAD_REPO] Status: {response.status_code}")
-            
-            if response.status_code in [200, 201]:
-                logger.info(f"[UPLOAD_REPO] Arquivo {file_name} enviado com sucesso para {destination_path}")
-                return True
-            else:
-                logger.error(f"[UPLOAD_REPO] Falha ao enviar arquivo {file_name}: {response.status_code}")
-                logger.error(f"[UPLOAD_REPO] Resposta: {response.text}")
-                return False
-                
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"[UPLOAD_REPO] Erro de conexão ao enviar {file_name}: {str(e)}")
-            return False
-        except requests.exceptions.Timeout as e:
-            logger.error(f"[UPLOAD_REPO] Timeout ao enviar {file_name}: {str(e)}")
-            return False
-        except Exception as e:
-            logger.error(f"[UPLOAD_REPO] Erro ao enviar {file_name}: {str(e)}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"[UPLOAD_REPO] Exceção ao fazer upload: {str(e)}")
-        logger.error(traceback.format_exc())
-        return False
-
-@router.get("/debug-auth")
-async def debug_auth():
-    """
-    Endpoint para depurar a autenticação e URLs
-    """
-    try:
-        # Carregar ambiente
-        load_dotenv()
-        
-        # Obter variáveis de ambiente
-        client_id = os.getenv("CLIENT_ID")
-        client_secret = os.getenv("CLIENT_SECRET")[:5] + "..." if os.getenv("CLIENT_SECRET") else None
-        tenant_id = os.getenv("TENANT_ID")
-        resource = os.getenv("RESOURCE")
-        site_url = os.getenv("SITE_URL")
-        
-        # Obter token via SharePointAuth
-        auth = SharePointAuth()
-        token = auth.acquire_token()
-        auth_site_url = auth.site_url
-        
-        # Montar URL como no curl que funcionou
-        test_folder = "/teams/BR-TI-TIN/contratos/Telecom/Repositório_Faturas_Auto_Orange/Cadastrar"
-        test_filename = "test.txt"
-        
-        # URL que funcionou no Postman 
-        working_url = f"https://weg365.sharepoint.com/teams/BR-TI-TIN/contratos/_api/web/GetFolderByServerRelativeUrl('{test_folder}')/Files/add(overwrite=true,url='{test_filename}')"
-        
-        # URL que seria construída com SITE_URL
-        current_url = f"{site_url}/_api/web/GetFolderByServerRelativeUrl('{test_folder}')/Files/add(overwrite=true,url='{test_filename}')"
-        
-        # URL que seria construída com auth.site_url
-        auth_url = f"{auth_site_url}/_api/web/GetFolderByServerRelativeUrl('{test_folder}')/Files/add(overwrite=true,url='{test_filename}')"
-        
-        return {
-            "env_vars": {
-                "client_id": client_id,
-                "client_secret_masked": client_secret,
-                "tenant_id": tenant_id,
-                "resource": resource,
-                "site_url": site_url,
-            },
-            "auth_info": {
-                "token_obtained": token is not None,
-                "token_first_20": token[:20] + "..." if token else None,
-                "auth_site_url": auth_site_url,
-            },
-            "urls": {
-                "working_url_from_curl": working_url,
-                "current_url_from_env": current_url,
-                "auth_url": auth_url,
-            }
-        }
-    except Exception as e:
-        logger.error(f"[DEBUG-AUTH] Erro: {str(e)}")
-        logger.error(traceback.format_exc())
-        return {"success": False, "error": str(e)}
-
-@router.get("/health-check")
-async def sharepoint_health_check():
-    """
-    Endpoint para verificar a saúde da conexão com o SharePoint.
-    Pode ser chamado periodicamente para monitoramento.
-    """
-    try:
-        start_time = datetime.now()
-        
-        # Obter autenticação
-        auth = SharePointAuth()
-        token = auth.acquire_token()
-        
-        if not token:
-            return {
-                "status": "error", 
-                "message": "Falha ao obter token de autenticação",
-                "timestamp": str(datetime.now())
-            }
-        
-        # Testar acesso às pastas principais
-        results = {}
-        
-        # Testar pasta de origem de NFSERV
-        nfserv_path = PATHS["NFSERV"]
-        try:
-            nfserv_exists = await check_folder_exists(token, auth.site_url, nfserv_path)
-            results["nfserv"] = {
-                "path": nfserv_path,
-                "exists": nfserv_exists
-            }
-        except Exception as e:
-            results["nfserv"] = {"error": str(e)}
-        
-        # Testar pasta de destino CADASTRAR
-        cadastrar_path = REPOSITORY_PATHS["CADASTRAR"]
-        try:
-            # Testar acesso e tentar listar arquivos
-            cadastrar_exists = await check_folder_exists(token, SHAREPOINT_CONTRATOS_BASE_URL, cadastrar_path)
-            results["cadastrar"] = {
-                "path": cadastrar_path,
-                "exists": cadastrar_exists
-            }
-            
-            if cadastrar_exists:
-                # Testar criação de arquivo simples
-                test_filename = f"healthcheck_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
-                test_content = f"Health check: {datetime.now()}".encode('utf-8')
-                
-                upload_success = await upload_file_to_repository(
-                    token, test_content, test_filename, cadastrar_path
-                )
-                
-                results["upload_test"] = {
-                    "success": upload_success,
-                    "filename": test_filename
-                }
-        except Exception as e:
-            results["cadastrar"] = {"error": str(e)}
-        
-        # Calcular tempo total
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
-        
-        return {
-            "status": "success" if all(r.get("exists", False) for r in results.values() if "error" not in r) else "warning",
-            "timestamp": str(end_time),
-            "duration_seconds": duration,
-            "results": results
-        }
-    except Exception as e:
-        logger.error(f"[HEALTH] Erro no health check: {str(e)}")
-        logger.error(traceback.format_exc())
-        return {
-            "status": "error",
-            "message": str(e),
-            "timestamp": str(datetime.now())
-        }
 
 async def prepare_date_folder_structure(token, site_url, base_folder_path, clean_month_folder=True):
     """
@@ -1222,57 +1091,170 @@ async def clean_folder(token, folder_path):
     Returns:
         bool: True se a limpeza foi bem-sucedida, False caso contrário
     """
+    import traceback
+    from app.api.routes.file_processor import list_files, delete_file
+    logger.info(f"[CLEAN_FOLDER] Iniciando limpeza da pasta: {folder_path}")
     try:
-        logger.info(f"[CLEAN_FOLDER] Iniciando limpeza da pasta: {folder_path}")
-        
-        # Listar todos os arquivos na pasta
-        files = await list_files(token, SHAREPOINT_CONTRATOS_BASE_URL, folder_path)
-        
-        if not files:
-            logger.info(f"[CLEAN_FOLDER] Pasta vazia ou não encontrada: {folder_path}")
-            return True
-        
-        logger.info(f"[CLEAN_FOLDER] Encontrados {len(files)} arquivos para remover")
-        
-        # Remover cada arquivo
+        files = await list_files(token, folder_path)
+        logger.info(f"[CLEAN_FOLDER] Arquivos encontrados na pasta '{folder_path}': {files}")
         success_count = 0
         fail_count = 0
         
-        for file in files:
-            file_name = file.get("Name")
-            
+        for file_name in files:
+            logger.info(f"[CLEAN_FOLDER] Tentando remover arquivo: {file_name} da pasta: {folder_path}")
             try:
-                # Construir a URL para excluir o arquivo
-                delete_url = f"{SHAREPOINT_CONTRATOS_BASE_URL}/_api/web/GetFileByServerRelativeUrl('{folder_path}/{file_name}')/recycleObject"
-                
-                headers = {
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/json;odata=verbose",
-                    "Content-Type": "application/json;odata=verbose",
-                    "X-HTTP-Method": "POST"
-                }
-                
-                # Executar a solicitação de exclusão
-                response = requests.post(delete_url, headers=headers)
-                
-                if response.status_code in [200, 201, 204]:
+                result = await delete_file(token, folder_path, file_name)
+                logger.info(f"[CLEAN_FOLDER] Resultado da exclusão do arquivo '{file_name}': {result}")
+                if result:
                     logger.info(f"[CLEAN_FOLDER] Arquivo removido com sucesso: {file_name}")
                     success_count += 1
                 else:
-                    logger.error(f"[CLEAN_FOLDER] Falha ao remover arquivo {file_name}: {response.status_code}")
-                    logger.error(f"[CLEAN_FOLDER] Resposta: {response.text}")
+                    logger.error(f"[CLEAN_FOLDER] Falha ao remover arquivo {file_name}")
                     fail_count += 1
-                    
             except Exception as e:
                 logger.error(f"[CLEAN_FOLDER] Erro ao remover arquivo {file_name}: {str(e)}")
+                logger.error(traceback.format_exc())
                 fail_count += 1
-        
-        # Verificar resultado
-        logger.info(f"[CLEAN_FOLDER] Resultado da limpeza: {success_count} arquivos removidos, {fail_count} falhas")
-        
+        logger.info(f"[CLEAN_FOLDER] Resultado final: {success_count} arquivos removidos, {fail_count} falhas na pasta {folder_path}")
         return fail_count == 0
-        
     except Exception as e:
         logger.error(f"[CLEAN_FOLDER] Erro ao limpar pasta: {str(e)}")
         logger.error(traceback.format_exc())
         return False
+
+@router.get("/health-check")
+async def sharepoint_health_check():
+    """
+    Endpoint para verificar a saúde da conexão com o SharePoint.
+    Pode ser chamado periodicamente para monitoramento.
+    """
+    try:
+        start_time = datetime.now()
+        
+        # Obter autenticação
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        
+        if not token:
+            return {
+                "status": "error", 
+                "message": "Falha ao obter token de autenticação",
+                "timestamp": str(datetime.now())
+            }
+        
+        # Testar acesso às pastas principais
+        results = {}
+        
+        # Testar pasta de origem de NFSERV
+        nfserv_path = PATHS["NFSERV"]
+        try:
+            nfserv_exists = await check_folder_exists(token, auth.site_url, nfserv_path)
+            results["nfserv"] = {
+                "path": nfserv_path,
+                "exists": nfserv_exists
+            }
+        except Exception as e:
+            results["nfserv"] = {"error": str(e)}
+        
+        # Testar pasta de destino CADASTRAR
+        cadastrar_path = REPOSITORY_PATHS["CADASTRAR"]
+        try:
+            # Testar acesso e tentar listar arquivos
+            cadastrar_exists = await check_folder_exists(token, SHAREPOINT_CONTRATOS_BASE_URL, cadastrar_path)
+            results["cadastrar"] = {
+                "path": cadastrar_path,
+                "exists": cadastrar_exists
+            }
+            
+            if cadastrar_exists:
+                # Testar criação de arquivo simples
+                test_filename = f"healthcheck_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
+                test_content = f"Health check: {datetime.now()}".encode('utf-8')
+                
+                upload_success = await upload_file_to_repository(
+                    token, test_content, test_filename, cadastrar_path
+                )
+                
+                results["upload_test"] = {
+                    "success": upload_success,
+                    "filename": test_filename
+                }
+        except Exception as e:
+            results["cadastrar"] = {"error": str(e)}
+        
+        # Calcular tempo total
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        
+        return {
+            "status": "success" if all(r.get("exists", False) for r in results.values() if "error" not in r) else "warning",
+            "timestamp": str(end_time),
+            "duration_seconds": duration,
+            "results": results
+        }
+    except Exception as e:
+        logger.error(f"[HEALTH] Erro no health check: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {
+            "status": "error",
+            "message": str(e),
+            "timestamp": str(datetime.now())
+        }
+
+@router.get("/debug-auth")
+async def debug_auth():
+    """
+    Endpoint para depurar a autenticação e URLs
+    """
+    try:
+        # Carregar ambiente
+        load_dotenv()
+        
+        # Obter variáveis de ambiente
+        client_id = os.getenv("CLIENT_ID")
+        client_secret = os.getenv("CLIENT_SECRET")[:5] + "..." if os.getenv("CLIENT_SECRET") else None
+        tenant_id = os.getenv("TENANT_ID")
+        resource = os.getenv("RESOURCE")
+        site_url = os.getenv("SITE_URL")
+        
+        # Obter token via SharePointAuth
+        auth = SharePointAuth()
+        token = auth.acquire_token()
+        auth_site_url = auth.site_url
+        
+        # Montar URL como no curl que funcionou
+        test_folder = "/teams/BR-TI-TIN/contratos/Telecom/Repositório_Faturas_Auto_Orange/Cadastrar"
+        test_filename = "test.txt"
+        
+        # URL que funcionou no Postman 
+        working_url = f"https://weg365.sharepoint.com/teams/BR-TI-TIN/contratos/_api/web/GetFolderByServerRelativeUrl('{test_folder}')/Files/add(overwrite=true,url='{test_filename}')"
+        
+        # URL que seria construída com SITE_URL
+        current_url = f"{site_url}/_api/web/GetFolderByServerRelativeUrl('{test_folder}')/Files/add(overwrite=true,url='{test_filename}')"
+        
+        # URL que seria construída com auth.site_url
+        auth_url = f"{auth_site_url}/_api/web/GetFolderByServerRelativeUrl('{test_folder}')/Files/add(overwrite=true,url='{test_filename}')"
+        
+        return {
+            "env_vars": {
+                "client_id": client_id,
+                "client_secret_masked": client_secret,
+                "tenant_id": tenant_id,
+                "resource": resource,
+                "site_url": site_url,
+            },
+            "auth_info": {
+                "token_obtained": token is not None,
+                "token_first_20": token[:20] + "..." if token else None,
+                "auth_site_url": auth_site_url,
+            },
+            "urls": {
+                "working_url_from_curl": working_url,
+                "current_url_from_env": current_url,
+                "auth_url": auth_url,
+            }
+        }
+    except Exception as e:
+        logger.error(f"[DEBUG-AUTH] Erro: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {"success": False, "error": str(e)}
