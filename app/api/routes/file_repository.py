@@ -315,7 +315,7 @@ async def copy_files_to_repository(clean_folders: bool = True):
                 file_name = file.get("Name")
                 
                 # Critério 1: QPE-\d{6}[A-Za-z] -> CADASTRAR
-                if re.search(r"QPE-\d{6}[A-Za-z]", file_name) and dest_folders.get("CADASTRAR"):
+                if re.search(r"QPE-\d{6}[A-Za-z]", file_name, re.IGNORECASE) and dest_folders.get("CADASTRAR"):
                     logger.info(f"[REPOSITORY] Arquivo {file_name} corresponde ao critério para CADASTRAR")
                     
                     # Usar o caminho final com estrutura de ano/ano.mês
@@ -335,7 +335,7 @@ async def copy_files_to_repository(clean_folders: bool = True):
                 # Critério 2: cidade + \d{6}[A-Za-z]\d{2} -> ESCRITURAR
                 cities = ["BLU", "POA", "VIX", "SPB", "REC", "BHO"]
                 has_city = any(city in file_name for city in cities)
-                has_pattern = re.search(r"\d{6}[A-Za-z]\d{2}", file_name) is not None
+                has_pattern = re.search(r"\d{6}[A-Za-z]\d{2}", file_name, re.IGNORECASE) is not None
                 
                 if has_city and has_pattern and dest_folders.get("ESCRITURAR"):
                     logger.info(f"[REPOSITORY] Arquivo {file_name} corresponde ao critério para ESCRITURAR")
