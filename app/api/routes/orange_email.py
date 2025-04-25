@@ -327,7 +327,7 @@ async def validate_orange_email_notifications(payload: Optional[Dict[str, Any]] 
         )
 
         # Case 1: The underlying check failed completely (e.g., API error, flow failed)
-        if not email_result["success"]:
+        if email_result.get("status") != "success":
             logger.warning(f"Underlying email check failed. Result: {email_result}")
             # Return a specific failure message indicating the check itself failed
             return {
