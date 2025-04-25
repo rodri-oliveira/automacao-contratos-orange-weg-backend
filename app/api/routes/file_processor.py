@@ -1567,7 +1567,7 @@ async def rename_files_clean():
                             if cidade_match:
                                 cidade = cidade_match.group(1).strip()
                                 logger.info(f"Cidade extraída: {cidade}")
-                                new_name = f"{cidade}_{original_name}"
+                                new_name = f"{cidade}_{original_name.upper()}"
                                 logger.info(f"Novo nome será: {new_name}")
                             else:
                                 results["erros"].append({
@@ -1588,12 +1588,14 @@ async def rename_files_clean():
                         })
                         continue
 
+                    # original_name = original_name.upper() # Transformar o nome em maiúsculas
+
                 # REGRA 2: QPE- com 6 números COM letra (CASE-INSENSITIVE)
                 # Procura "QPE-" seguido de 6 dígitos E uma letra.
                 elif re.search(r"QPE-\d{6}[A-Za-z]", original_name, re.IGNORECASE):
                     file_type = "qpe_com_letra"
                     logger.info(f"Identificado como QPE com letra: {original_name}")
-                    new_name = f"FATURA-LOCAÇÃO_{original_name}"
+                    new_name = f"FATURA-LOCAÇÃO_{original_name.upper()}"
                     destination_folder = PATHS.get("NFSERV", "/teams/BR-TI-TIN/AutomaoFinanas/NFSERV")
                     file_content = await download_file(token, site_url, PATHS["ENTRADA"], original_name)
                     if not file_content:
@@ -1602,6 +1604,8 @@ async def rename_files_clean():
                             "erro": "não foi possível baixar o arquivo (QPE com letra)"
                         })
                         continue
+
+                    # original_name = original_name.upper() # Transformar o nome em maiúsculas
 
                 # REGRA 3: SPB- com 6 números SEM letra (CASE-INSENSITIVE)
                 # Procura "SPB-" seguido de 6 dígitos, garantindo que NÃO há letra logo após.
@@ -1621,7 +1625,7 @@ async def rename_files_clean():
                             if cidade_match:
                                 cidade = re.sub(r'----$', '', cidade_match.group(1)).strip()
                                 logger.info(f"Cidade extraída: {cidade}")
-                                new_name = f"{cidade}_{original_name}"
+                                new_name = f"{cidade}_{original_name.upper()}"
                                 logger.info(f"Novo nome será: {new_name}")
                             else:
                                 results["erros"].append({
@@ -1642,12 +1646,14 @@ async def rename_files_clean():
                         })
                         continue
 
+                    # original_name = original_name.upper() # Transformar o nome em maiúsculas
+
                 # REGRA 4: Arquivos de TELECOM (CASE-INSENSITIVE)
                 # Procura (BLU ou POA etc.) seguido de "-", 6 dígitos, uma letra e 2 dígitos.
                 elif re.search(r"(BLU|POA|VIX|SPB|REC|BHO)-\d{6}[A-Za-z]\d{2}", original_name, re.IGNORECASE):
                     file_type = "telecom"
                     logger.info(f"Identificado como TELECOM: {original_name}")
-                    new_name = f"TELECOMUNICAÇÕES_{original_name}"
+                    new_name = f"TELECOMUNICAÇÕES_{original_name.upper()}"
                     destination_folder = PATHS.get("NFSERV", "/teams/BR-TI-TIN/AutomaoFinanas/NFSERV")
                     file_content = await download_file(token, site_url, PATHS["ENTRADA"], original_name)
                     if not file_content:
@@ -1656,6 +1662,8 @@ async def rename_files_clean():
                             "erro": "não foi possível baixar o arquivo (TELECOM)"
                         })
                         continue
+
+                    original_name = original_name.upper() # Transformar o nome em maiúsculas
 
                 # Se não corresponder a nenhum padrão
                 else:
@@ -1693,13 +1701,13 @@ async def rename_files_clean():
 
                 # Verificar se o novo nome já existe (para evitar conflitos)
                 if new_name in existing_names:
-                    logger.warning(f"Conflito de nomes: {new_name} já existe na pasta, gerando nome único")
-                    base_name, ext = os.path.splitext(new_name)
+                    logger.warning(f"Conflito de nomes: {new_name.upper()} já existe na pasta, gerando nome único")
+                    base_name, ext = os.path.splitext(new_name.upper())
                     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
                     new_name = f"{base_name}_{timestamp}{ext}"
 
                 # FASE 1: RENOMEAR O ARQUIVO NA PASTA ENTRADA (Upload com novo nome, depois delete do original)
-                logger.info(f"Renomeando arquivo: {original_name} -> {new_name}")
+                logger.info(f"Renomeando arquivo: {original_name} -> {new_name.upper()}")
                 # Precisamos do conteúdo do arquivo aqui. Ele foi baixado nos blocos IF/ELIF.
                 if not file_content:
                      logger.error(f"Conteúdo do arquivo {original_name} não está disponível para renomear (upload). Pulando.")
@@ -1709,7 +1717,7 @@ async def rename_files_clean():
                      })
                      continue # Pula para o próximo arquivo
 
-                upload_success = await upload_file(token, site_url, file_content, new_name, PATHS["ENTRADA"])
+                upload_success = await upload_file(token, site_url, file_content, new_name.upper(), PATHS["ENTRADA"])
 
                 if upload_success:
                     # Excluir o arquivo original APÓS upload do novo
@@ -1719,24 +1727,24 @@ async def rename_files_clean():
                         # Registrar sucesso na renomeação
                         results[file_type].append({
                             "original": original_name,
-                            "novo": new_name
+                            "novo": new_name.upper()
                         })
 
                         # Armazenar informações para mover depois
                         renamed_files.append({
-                            "name": new_name,
+                            "name": new_name.upper(),
                             "type": file_type,
                             "destination": destination_folder,
                             "content": file_content # Passar o conteúdo para evitar re-download
                         })
 
                         # Adicionar à lista de processados e nomes existentes
-                        processed_files_history.add(new_name) # Adiciona o NOVO nome
+                        processed_files_history.add(new_name.upper()) # Adiciona o NOVO nome
                         existing_names.add(new_name)
                         if original_name in existing_names:
                              existing_names.remove(original_name) # Remove o antigo
 
-                        logger.info(f"Arquivo renomeado com sucesso na ENTRADA: {original_name} -> {new_name}")
+                        logger.info(f"Arquivo renomeado com sucesso na ENTRADA: {original_name} -> {new_name.upper()}")
                     else:
                         logger.error(f"Erro ao excluir arquivo original após renomear: {original_name}")
                         results["erros"].append({
@@ -1745,7 +1753,7 @@ async def rename_files_clean():
                         })
                         # Tentar reverter? Ou deixar o arquivo novo e logar o erro? Por segurança, logamos e continuamos.
                 else:
-                    logger.error(f"Erro ao fazer upload do arquivo renomeado: {new_name}")
+                    logger.error(f"Erro ao fazer upload do arquivo renomeado: {new_name.upper()}")
                     results["erros"].append({
                         "arquivo": original_name,
                         "erro": "falha ao fazer upload do novo arquivo (renomear)"
