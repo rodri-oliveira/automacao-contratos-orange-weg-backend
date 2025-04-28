@@ -279,32 +279,32 @@ async def check_orange_email_notifications(skip_validation: bool = False) -> Dic
                 logger.error(f"Initial call to PA failed: {initial_response.status_code} - {initial_response.text}")
                 initial_response.raise_for_status() 
 
-            can_proceed = success and (skip_validation or email_count > 0)
+            can_proceed = (flow_status == 'Succeeded') and (skip_validation or email_count > 0)
 
             # Melhorar a construção da mensagem final
             if flow_status == 'TimedOut':
                 final_message = f"A verificação excedeu o tempo limite ({MAX_POLLING_DURATION_SECONDS}s). Status: Timeout. Verificação parcial encontrou {email_count} emails."
                 can_proceed = False # Timeout impede o prosseguimento
-            elif success:
+            elif flow_status == 'Succeeded':
                 if email_count > 0:
                     final_message = f"Verificação concluída com sucesso. {email_count} emails encontrados."
                     # can_proceed já foi definido corretamente acima
-                else: # success is True, email_count is 0
+                else: # flow_status é 'Succeeded', email_count é 0
                     final_message = "Verificação concluída com sucesso. Nenhum email novo encontrado."
                     can_proceed = False # Não prosseguir se não houver emails (a menos que skip_validation seja True, já tratado)
-            else: # Not success and not TimedOut (e.g., Failed, Cancelled)
+            else: # Not 'Succeeded' and not 'TimedOut' (e.g., Failed, Cancelled)
                 final_message = f"Falha na verificação. Status final: {flow_status}. Emails encontrados: {email_count}."
                 can_proceed = False # Falha impede o prosseguimento
 
             log_message = (
-                f"Resultado final: success={success}, status='{flow_status}', "
+                f"Resultado final: success={(flow_status == 'Succeeded')}, status='{flow_status}', "
                 f"email_count={email_count}, can_proceed={can_proceed}, "
                 f"skip_validation={skip_validation}, message='{final_message}'"
             )
             logger.info(log_message)
 
             return {
-                "success": success,
+                "success": (flow_status == 'Succeeded'),
                 "message": final_message,
                 "email_count": email_count,
                 "can_proceed": can_proceed

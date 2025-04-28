@@ -1148,47 +1148,47 @@ async def move_files_to_destinations(skip_cleanup: bool = False):
         with process_lock:
             process_running = False
 
-@router.post("/process-complete")
-async def process_complete():
-    """
-    Executa o processo completo: renomeia e move os arquivos,
-    em duas etapas sequenciais.
-    """
-    try:
-        logger.info("=== INICIANDO PROCESSO COMPLETO (RENOMEAR E MOVER) ===")
+# @router.post("/process-complete")
+# async def process_complete():
+#     """
+#     Executa o processo completo: renomeia e move os arquivos,
+#     em duas etapas sequenciais.
+#     """
+#     try:
+#         logger.info("=== INICIANDO PROCESSO COMPLETO (RENOMEAR E MOVER) ===")
         
-        # ETAPA 1: Renomear arquivos
-        logger.info("ETAPA 1: Renomeando arquivos...")
-        rename_result = await rename_files()
+#         # ETAPA 1: Renomear arquivos
+#         logger.info("ETAPA 1: Renomeando arquivos...")
+#         rename_result = await rename_files()
         
-        if not rename_result.get("success", False):
-            logger.error(f"Falha na etapa de renomeação: {rename_result.get('message')}")
-            return {
-                "success": False,
-                "message": f"Falha na etapa de renomeação: {rename_result.get('message')}",
-                "etapa_1": rename_result
-            }
+#         if not rename_result.get("success", False):
+#             logger.error(f"Falha na etapa de renomeação: {rename_result.get('message')}")
+#             return {
+#                 "success": False,
+#                 "message": f"Falha na etapa de renomeação: {rename_result.get('message')}",
+#                 "etapa_1": rename_result
+#             }
         
-        # Aguardar um momento para garantir que todas as operações SharePoint foram concluídas
-        logger.info("Aguardando conclusão das operações de renomeação...")
-        await asyncio.sleep(2)
+#         # Aguardar um momento para garantir que todas as operações SharePoint foram concluídas
+#         logger.info("Aguardando conclusão das operações de renomeação...")
+#         await asyncio.sleep(2)
         
-        # ETAPA 2: Mover arquivos
-        logger.info("ETAPA 2: Movendo arquivos...")
-        move_result = await move_files_to_destinations()
+#         # ETAPA 2: Mover arquivos
+#         logger.info("ETAPA 2: Movendo arquivos...")
+#         move_result = await move_files_to_destinations()
         
-        # Retornar resultados combinados
-        return {
-            "success": True,
-            "message": "Processo completo executado com sucesso",
-            "etapa_1_renomeacao": rename_result,
-            "etapa_2_movimentacao": move_result
-        }
+#         # Retornar resultados combinados
+#         return {
+#             "success": True,
+#             "message": "Processo completo executado com sucesso",
+#             "etapa_1_renomeacao": rename_result,
+#             "etapa_2_movimentacao": move_result
+#         }
         
-    except Exception as e:
-        logger.error(f"Erro no processo completo: {str(e)}")
-        logger.exception("Detalhes do erro:")
-        return {"success": False, "message": f"Erro: {str(e)}"}
+#     except Exception as e:
+#         logger.error(f"Erro no processo completo: {str(e)}")
+#         logger.exception("Detalhes do erro:")
+#         return {"success": False, "message": f"Erro: {str(e)}"}
 
 @router.post("/reset-process")
 async def reset_process():
