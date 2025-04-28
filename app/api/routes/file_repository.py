@@ -935,16 +935,16 @@ async def prepare_date_folder_structure(token, site_url, base_folder_path, clean
         
         # Criar pasta do ano se não existir
         if not year_folder_exists:
-            logger.info(f"[DATE_FOLDER] Criando pasta do ano: {year_path}")
+            logger.info(f"[DATE_FOLDER] Criando pasta do ano: {year_folder_path}")
             year_folder_created = await create_folder(token, SHAREPOINT_CONTRATOS_BASE_URL, year_folder_path)
             
             if not year_folder_created:
-                logger.error(f"[DATE_FOLDER] Falha ao criar pasta do ano: {year_path}")
+                logger.error(f"[DATE_FOLDER] Falha ao criar pasta do ano: {year_folder_path}")
                 return None
             
-            logger.info(f"[DATE_FOLDER] Pasta do ano criada com sucesso: {year_path}")
+            logger.info(f"[DATE_FOLDER] Pasta do ano criada com sucesso: {year_folder_path}")
         else:
-            logger.info(f"[DATE_FOLDER] Pasta do ano já existe: {year_path}")
+            logger.info(f"[DATE_FOLDER] Pasta do ano já existe: {year_folder_path}")
         
         # Caminho para pasta ano.mês
         year_month_folder_path = f"{year_folder_path}/{current_year_month}"
