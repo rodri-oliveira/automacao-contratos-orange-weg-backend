@@ -1707,7 +1707,7 @@ async def rename_files_clean():
                     new_name = f"{base_name}_{timestamp}{ext}"
 
                 # FASE 1: RENOMEAR O ARQUIVO NA PASTA ENTRADA (Upload com novo nome, depois delete do original)
-                logger.info(f"Renomeando arquivo: {original_name} -> {new_name.upper()}")
+                logger.info(f"Renomeando arquivo: {original_name} -> {new_name}")
                 # Precisamos do conteúdo do arquivo aqui. Ele foi baixado nos blocos IF/ELIF.
                 if not file_content:
                      logger.error(f"Conteúdo do arquivo {original_name} não está disponível para renomear (upload). Pulando.")
@@ -1727,24 +1727,24 @@ async def rename_files_clean():
                         # Registrar sucesso na renomeação
                         results[file_type].append({
                             "original": original_name,
-                            "novo": new_name.upper()
+                            "novo": new_name
                         })
 
                         # Armazenar informações para mover depois
                         renamed_files.append({
-                            "name": new_name.upper(),
+                            "name": new_name,
                             "type": file_type,
                             "destination": destination_folder,
                             "content": file_content # Passar o conteúdo para evitar re-download
                         })
 
                         # Adicionar à lista de processados e nomes existentes
-                        processed_files_history.add(new_name.upper()) # Adiciona o NOVO nome
+                        processed_files_history.add(new_name) # Adiciona o NOVO nome
                         existing_names.add(new_name)
                         if original_name in existing_names:
                              existing_names.remove(original_name) # Remove o antigo
 
-                        logger.info(f"Arquivo renomeado com sucesso na ENTRADA: {original_name} -> {new_name.upper()}")
+                        logger.info(f"Arquivo renomeado com sucesso na ENTRADA: {original_name} -> {new_name}")
                     else:
                         logger.error(f"Erro ao excluir arquivo original após renomear: {original_name}")
                         results["erros"].append({
@@ -1753,7 +1753,7 @@ async def rename_files_clean():
                         })
                         # Tentar reverter? Ou deixar o arquivo novo e logar o erro? Por segurança, logamos e continuamos.
                 else:
-                    logger.error(f"Erro ao fazer upload do arquivo renomeado: {new_name.upper()}")
+                    logger.error(f"Erro ao fazer upload do arquivo renomeado: {new_name}")
                     results["erros"].append({
                         "arquivo": original_name,
                         "erro": "falha ao fazer upload do novo arquivo (renomear)"
