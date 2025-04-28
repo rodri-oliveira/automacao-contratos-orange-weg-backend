@@ -117,12 +117,12 @@ class ConsolidatedReport:
             
             # Define as pastas e nomes das abas
             folders = [
-                {"path": "MUN_CODE", "sheet_name": "Mun_Code_R189"},
-                {"path": "SRV_CODE_SIMPLE", "sheet_name": "Srv_Code_Simple"},
                 {"path": "R189", "sheet_name": "Divergencias_R189"},
+                {"path": "SRV_CODE_SIMPLE", "sheet_name": "Srv_Code_Simple"},
+                {"path": "MUN_CODE", "sheet_name": "SRV_Code"}, # Nome da aba alterado
                 {"path": "QPE_R189", "sheet_name": "QPE_vs_R189"},
                 {"path": "SPO_R189", "sheet_name": "SPB_vs_R189"},
-                {"path": "NFSERV_R189", "sheet_name": "NFSERV_vs_R189"}
+                {"path": "NFSERV_R189", "sheet_name": "FATURAS"} # Nome da aba alterado
             ]
             
             # Cria DataFrames vazios para o caso de não encontrar arquivos
